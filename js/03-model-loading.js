@@ -3,7 +3,7 @@ const DRACO_LOCAL_PATH = new URL('js/libs/draco/', window.location.href).href;
 /**
  * 03-model-loading.js
  * Modulo per il caricamento dei modelli 3D.
- * Gestisce l'importazione di file OBJ (con streaming worker inline), GLB/GLTF, PLY e 3TZ.
+ * Gestisce l'importazione di file OBJ (con streaming worker inline), GLB/GLTF, PLY, 3TZ e SKETCHFAB.
  */
 
 const CHUNK_SIZE_OBJ = 16 * 1024 * 1024; // 16 MB per chunk
@@ -807,6 +807,12 @@ async function load3TZ(file) {
 }
 
 async function handleFileUpload(files) {
+   
+    const sketchfabPanel = document.getElementById('sketchfab-import-panel');
+    if (sketchfabPanel) sketchfabPanel.style.display = 'none';
+    
+    
+    
     if (!files || files.length === 0) return;
     
     resetFeaturesAndTiles();
@@ -1104,3 +1110,190 @@ function autoCalcStrike() {
         document.getElementById('input-strike').value = Math.round((dipDirVal - 90 + 360) % 360);
     }
 }
+
+
+// ==========================================
+// SEZIONE SKETCHFAB (AGGIUNTA)
+// ==========================================
+
+window.toggleSketchfabPanel = function() {
+    const panel = document.getElementById('sketchfab-import-panel');
+    if (!panel) return;
+    
+    const isHidden = panel.style.display === 'none';
+    panel.style.display = isHidden ? 'block' : 'none';
+
+    if (isHidden) {
+        const tokenInput = document.getElementById('sketchfab-api-token');
+        const savedToken = localStorage.getItem('sketchfab_api_token');
+        if (tokenInput && savedToken) tokenInput.value = savedToken;
+    }
+};
+
+window.executeSketchfabDownload = function() {
+    const urlInput = document.getElementById('sketchfab-url-input');
+    const tokenInput = document.getElementById('sketchfab-api-token');
+
+    const pageUrl = urlInput ? urlInput.value.trim() : '';
+    const apiToken = tokenInput ? tokenInput.value.trim() : '';
+
+    loadModelFromSketchfab(pageUrl, apiToken);
+};
+
+function extractSketchfabUID(url) {
+    const regex = /([a-f0-9]{32})/i;
+    const match = url.match(regex);
+    return match ? match[1] : null;
+}
+
+async function loadModelFromSketchfab(pageUrl, apiToken) {
+    const uid = extractSketchfabUID(pageUrl);
+
+    if (!uid) {
+        alert("Sketchfab URL is not valid.");
+        return;
+    }
+
+    if (!apiToken) {
+        alert("Sketchfab API key Token.");
+        return;
+    }
+
+    // Memorizza l'API Key nel browser
+    localStorage.setItem('sketchfab_api_token', apiToken);
+
+    // Pulisce l'input dell'URL per la prossima volta
+    const urlInput = document.getElementById('sketchfab-url-input');
+    if (urlInput) urlInput.value = '';
+
+    // Nasconde il pannello di importazione
+    const panel = document.getElementById('sketchfab-import-panel');
+    if (panel) panel.style.display = 'none';
+
+
+
+    // 1. Resetta le feature digitalizzate e le 3D Tiles attive
+    resetFeaturesAndTiles();
+
+    // 2. Rimuove e distrugge il modello standard caricato in precedenza
+    if (loadedMesh) {
+        scene.remove(loadedMesh);
+        if (typeof safeDispose === 'function') safeDispose(loadedMesh);
+        loadedMesh = null;
+    }
+
+    const statusElem = document.getElementById('status');
+    if (statusElem) {
+        statusElem.textContent = "Connessione a Sketchfab...";
+        statusElem.style.color = '#e0a800';
+    }
+
+    try {
+        const response = await fetch(`https://api.sketchfab.com/v3/models/${uid}/download`, {
+            method: 'GET',
+            headers: { 'Authorization': `Token ${apiToken}` }
+        });
+
+        if (!response.ok) {
+            if (response.status === 401) throw new Error("API Token non valido o modello protetto.");
+            if (response.status === 404) throw new Error("Modello non trovato o scaricabile.");
+            throw new Error(`Errore API (${response.status})`);
+        }
+
+        const data = await response.json();
+        const downloadUrl = data.glb ? data.glb.url : (data.gltf ? data.gltf.url : null);
+
+        if (!downloadUrl) {
+            throw new Error("Nessun file GLB/GLTF scaricabile trovato per questo modello.");
+        }
+
+        if (statusElem) statusElem.textContent = "Download modello...";
+
+        const fileResponse = await fetch(downloadUrl);
+        const blob = await fileResponse.blob();
+
+        if (downloadUrl.includes('.zip') || blob.type.includes('zip')) {
+            if (statusElem) statusElem.textContent = "Decompressione ZIP...";
+            
+            const zip = await JSZip.loadAsync(blob);
+            const files = {};
+            
+            for (const filename of Object.keys(zip.files)) {
+                const file = zip.files[filename];
+                if (!file.dir) {
+                    const fileBlob = await file.async('blob');
+                    files[filename] = URL.createObjectURL(fileBlob);
+                }
+            }
+
+            const gltfFilename = Object.keys(files).find(name => name.endsWith('.gltf'));
+            if (!gltfFilename) throw new Error("Nessun file .gltf trovato nell'archivio ZIP.");
+
+            const manager = new THREE.LoadingManager();
+            manager.setURLModifier((url) => {
+                const cleanUrl = url.replace(/^.*[\\\/]/, '');
+                return files[cleanUrl] || url;
+            });
+
+            const loader = new THREE.GLTFLoader(manager);
+            if (typeof THREE.DRACOLoader !== 'undefined') {
+                const dracoLoader = new THREE.DRACOLoader();
+                dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+                loader.setDRACOLoader(dracoLoader);
+            }
+
+            loader.load(files[gltfFilename], async (gltf) => {
+                const box = new THREE.Box3().setFromObject(gltf.scene);
+                if (!box.isEmpty()) {
+                    const center = box.getCenter(new THREE.Vector3());
+                    const estimatedCRS = estimateCRSFromCoords(center.x, center.y);
+                    populateCRSDropdown(estimatedCRS);
+                } else {
+                    populateCRSDropdown(null);
+                }
+                await onModelLoaded(gltf.scene);
+            });
+
+        } else {
+            const loader = new THREE.GLTFLoader();
+            if (typeof THREE.DRACOLoader !== 'undefined') {
+                const dracoLoader = new THREE.DRACOLoader();
+                dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+                loader.setDRACOLoader(dracoLoader);
+            }
+
+            const blobUrl = URL.createObjectURL(blob);
+            loader.load(blobUrl, async (gltf) => {
+                URL.revokeObjectURL(blobUrl);
+                const box = new THREE.Box3().setFromObject(gltf.scene);
+                if (!box.isEmpty()) {
+                    const center = box.getCenter(new THREE.Vector3());
+                    const estimatedCRS = estimateCRSFromCoords(center.x, center.y);
+                    populateCRSDropdown(estimatedCRS);
+                } else {
+                    populateCRSDropdown(null);
+                }
+                await onModelLoaded(gltf.scene);
+            });
+        }
+
+    } catch (err) {
+        console.error("Errore Sketchfab Import:", err);
+        alert(`Impossibile importare da Sketchfab: ${err.message}`);
+        if (statusElem) {
+            statusElem.textContent = "Errore Sketchfab";
+            statusElem.style.color = '#ff4444';
+        }
+    }
+}
+
+
+// Ripopola l'API Key all'avvio della pagina se presente nel localStorage
+document.addEventListener('DOMContentLoaded', () => {
+    const savedToken = localStorage.getItem('sketchfab_api_token');
+    const tokenInput = document.getElementById('sketchfab-api-token');
+    
+    if (savedToken && tokenInput) {
+        tokenInput.value = savedToken;
+    }
+});
