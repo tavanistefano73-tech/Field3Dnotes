@@ -25,14 +25,13 @@
         <script src="OBJLoader.js"></script>
         <script src="MTLLoader.js"></script>
         <script src="jszip.min.js"></script>
-        <script src="3dTilesRenderer-offline.js"></script>
         <script src="PLYLoader.js"></script>
       
         <script type="module">
             import { TilesRenderer } from 'https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.3.30/+esm';
             window.TilesRenderer = TilesRenderer;
         </script>
-        <script src="res/proj4.js"></script>
+        <script src="proj4.js"></script>
     </head>
         
 <body>
@@ -116,6 +115,7 @@
                         <div class="menu-item" onclick="triggerFileInput(); closeMenu();">Load model</div>
                         <div class="menu-item" onclick="saveToGeoJSON()">Save to JSON</div>
                         <div class="menu-item" onclick="triggerGeoJSONInput(); closeMenu();">Load from JSON</div>
+                        <div class="menu-item" onclick="toggleSketchfabPanel(); closeMenu();">Import from Sketchfab</div>
                     </div>
                 </div>
 
@@ -136,6 +136,44 @@
             <div id="ui-content">
                 <input type="file" id="file-input" multiple accept="*/*" style="display:none;" onchange="handleFileUpload(this.files)">
                 <input type="file" id="geojson-input" multiple style="display:none;" onchange="loadGeoJSONFile(this.files)">
+                        
+                        <!-- Sketchfab import panel container -->
+                        <div id="sketchfab-import-panel" style="display: none; border: 1px solid #333; padding: 10px; border-radius: 8px; background-color: #1a1a1a; margin-top: 8px;">
+                            
+                            <div style="font-weight: bold; color: #1D9E75; margin-bottom: 8px;">
+                                🎨 Import from Sketchfab
+                            </div>
+
+                            <!-- 3 vertical rows layout -->
+                            <div style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
+                                
+                                <!-- Row 1: API Key -->
+                                <input
+                                    type="text"
+                                    id="sketchfab-api-token"
+                                    placeholder="API key"
+                                    style="width: 100%; box-sizing: border-box; padding: 6px 8px; background-color: #000; color: #fff; border: 1px solid #444; border-radius: 4px;"
+                                />
+
+                                <!-- Row 2: Model URL -->
+                                <input
+                                    type="text"
+                                    id="sketchfab-url-input"
+                                    placeholder="Paste Sketchfab Model URL..."
+                                    style="width: 100%; box-sizing: border-box; padding: 6px 8px; background-color: #000; color: #fff; border: 1px solid #444; border-radius: 4px;"
+                                />
+
+                                <!-- Row 3: Import Button -->
+                                <button
+                                    onclick="executeSketchfabDownload()"
+                                    style="width: 100%; box-sizing: border-box; padding: 8px; background-color: #1D9E75; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;"
+                                >
+                                    Import
+                                </button>
+
+                            </div>
+                        </div>
+                        
                         
                 <div id="digitize-controls" class="ui-hideable">
                     <div style="margin: 6px 0; border-top: 1px solid #444; padding-top: 4px;">
