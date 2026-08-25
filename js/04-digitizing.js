@@ -578,8 +578,8 @@ function calculatePCAAndOrientationJS(pointsGis) {
     nx /= normLen; ny /= normLen; nz /= normLen;
     let dip = Math.acos(Math.min(1.0, Math.abs(nz))) * (180.0 / Math.PI);
 
-    let dnx = nz > 0 ? -nx : nx;
-    let dny = nz > 0 ? -ny : ny;
+    let dnx = nz < 0 ? -nx : nx;
+    let dny = nz < 0 ? -ny : ny;
 
     let dipDir = 0, strike = 0;
     if (Math.abs(dnx) >= 1e-9 || Math.abs(dny) >= 1e-9) {
