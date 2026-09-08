@@ -1,0 +1,39 @@
+{
+  "name": "field3dnotes",
+  "version": "1.0.0",
+  "description": "3D Viewer Offline per Field3Dnotes",
+  "author": "Stefano Tavani",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win --x64"
+  },
+  "dependencies": {
+    "obj2gltf": "^3.1.4"
+  },
+  "devDependencies": {
+      "electron": "27.0.0",
+      "electron-builder": "^24.9.0"
+  },
+  "build": {
+      "appId": "com.field3dnotes.app",
+      "productName": "Field3Dnotes",
+      "asar": false,
+      "directories": {
+        "output": "dist"
+      },
+      "files": [
+        "**/*",
+        "!dist/**/*"
+      ],
+      "mac": {
+        "category": "public.app-category.graphics-design",
+        "identity": null,
+        "target": ["dmg"]
+      },
+      "win": {
+        "target": ["portable"]
+      }
+  }
+}

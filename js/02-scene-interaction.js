@@ -1,5 +1,5 @@
 function recenterScene() {
-    toggleSetCenter(false);
+    
     if (!loadedMesh) {
         camera.position.set(10, 10, 10);
         controls.target.set(0, 0, 0);
@@ -18,41 +18,8 @@ function recenterScene() {
     document.getElementById('status').style.color = '#1D9E75';
 }
 
-function toggleSetCenter(forceState) {
-    if (forceState !== undefined) {
-        isSettingCenter = forceState;
-    } else {
-        if (!loadedMesh) return alert("Load a 3D model first!");
-        isSettingCenter = !isSettingCenter;
-    }
 
-    const btn = document.getElementById('btn-set-center');
-    if (btn) {
-        if (isSettingCenter) {
-            btn.style.background = '#1D9E75';
-            btn.style.borderColor = '#55ff55';
-            document.getElementById('status').textContent = 'Tap a point to set center 📍';
-            document.getElementById('status').style.color = '#e0a800';
-        } else {
-            btn.style.background = '#2a2a2a';
-            btn.style.borderColor = '#444';
-        }
-    }
-}
 
-function setCenterAtMouse(e) {
-    if (!loadedMesh) return;
-    updateMouseCoords(e);
-    raycaster.setFromCamera(mouse, camera);
-    const intersects = raycaster.intersectObject(loadedMesh, true);
-    if (intersects.length > 0) {
-        controls.target.copy(intersects[0].point);
-        controls.update();
-        document.getElementById('status').textContent = 'New center set ✓';
-        document.getElementById('status').style.color = '#1D9E75';
-    }
-    toggleSetCenter(false);
-}
 
 function safeDispose(obj) {
     if (!obj) return;
@@ -176,6 +143,67 @@ function applyModelRotation(degrees) {
         render();
     }
 }
+// Imposta il nuovo centro di rotazione tramite doppio clic / doppio tap sul punto del modello
+(function initDoubleTapSetCenter() {
+    let lastTapTime = 0;
+    let lastTapX = 0;
+    let lastTapY = 0;
 
+    function setCenterFromCoords(clientX, clientY) {
+        if (!loadedMesh || typeof raycaster === 'undefined' || typeof camera === 'undefined') return;
+
+        const container = document.getElementById('canvas-container');
+        if (!container) return;
+
+        const rect = container.getBoundingClientRect();
+        
+        // Converti le coordinate dello schermo in coordinate Normalizzate Device (-1 a +1)
+        mouse.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+        mouse.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObject(loadedMesh, true);
+
+        if (intersects.length > 0) {
+            controls.target.copy(intersects[0].point);
+            controls.update();
+            
+            const statusEl = document.getElementById('status');
+            if (statusEl) {
+                statusEl.textContent = 'New center set ✓';
+                statusEl.style.color = '#1D9E75';
+            }
+        }
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+        const container = document.getElementById('canvas-container');
+        if (!container) return;
+
+        // 1. Doppio clic da Desktop
+        container.addEventListener('dblclick', (e) => {
+            setCenterFromCoords(e.clientX, e.clientY);
+        });
+
+        // 2. Doppio tap da Mobile
+        container.addEventListener('touchend', (e) => {
+            if (e.changedTouches.length !== 1) return;
+
+            const touch = e.changedTouches[0];
+            const now = Date.now();
+            const timeDiff = now - lastTapTime;
+            const dist = Math.hypot(touch.clientX - lastTapX, touch.clientY - lastTapY);
+
+            if (timeDiff > 0 && timeDiff < 300 && dist < 30) {
+                setCenterFromCoords(touch.clientX, touch.clientY);
+                lastTapTime = 0;
+            } else {
+                lastTapTime = now;
+                lastTapX = touch.clientX;
+                lastTapY = touch.clientY;
+            }
+        });
+    });
+})();
 window.syncAndRotateModel = syncAndRotateModel;
 window.applyModelRotation = applyModelRotation;

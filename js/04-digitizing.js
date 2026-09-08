@@ -43,11 +43,10 @@ function toggleDigitizing() {
 
 function cancelCurrentDigitizing() {
     isDigitizing = false;
-    safeDispose(currentPlaneMesh); currentPlaneMesh = null;
-    safeDispose(currentPlaneWireframe); currentPlaneWireframe = null;
-    safeDispose(currentPointsObj); currentPointsObj = null;
-    safeDispose(currentLineMesh); currentLineMesh = null;
-    currentPoints = []; currentPlaneCorners = null;
+    if (currentPlaneMesh) { scene.remove(currentPlaneMesh); safeDispose(currentPlaneMesh); currentPlaneMesh = null; }
+    if (currentPlaneWireframe) { scene.remove(currentPlaneWireframe); safeDispose(currentPlaneWireframe); currentPlaneWireframe = null; }
+    if (currentPointsObj) { scene.remove(currentPointsObj); safeDispose(currentPointsObj); currentPointsObj = null; }
+    if (currentLineMesh) { scene.remove(currentLineMesh); safeDispose(currentLineMesh); currentLineMesh = null; }    currentPoints = []; currentPlaneCorners = null;
 
     const btn = document.getElementById('btn-toggle-digitize');
     if (btn) { btn.textContent = "▶ Start Digitizing"; btn.className = "start-btn"; }
@@ -132,9 +131,9 @@ function calculatePlaneCornersForPoints(points) {
 }
 
 function updateBestFitPlane() {
-    safeDispose(currentPlaneMesh); currentPlaneMesh = null;
-    safeDispose(currentPlaneWireframe); currentPlaneWireframe = null;
-
+    if (currentPlaneMesh) { scene.remove(currentPlaneMesh); safeDispose(currentPlaneMesh); currentPlaneMesh = null; }
+    if (currentPlaneWireframe) { scene.remove(currentPlaneWireframe); safeDispose(currentPlaneWireframe); currentPlaneWireframe = null; }
+    
     if (currentPoints.length < 3) {
         document.getElementById('collinear-val').textContent = '-';
         document.getElementById('coplanar-val').textContent = '-';
@@ -450,12 +449,12 @@ function addPointAtMouse(e) {
 
     currentPoints.push(pt);
 
-    safeDispose(currentPointsObj);
+    if (currentPointsObj) { scene.remove(currentPointsObj); safeDispose(currentPointsObj); }
     currentPointsObj = new THREE.Points(new THREE.BufferGeometry().setFromPoints(currentPoints), activePointsMat);
     scene.add(currentPointsObj);
 
     if (currentPoints.length > 1) {
-        safeDispose(currentLineMesh);
+        if (currentLineMesh) { scene.remove(currentLineMesh); safeDispose(currentLineMesh); }
         currentLineMesh = new THREE.Line(new THREE.BufferGeometry().setFromPoints(currentPoints), new THREE.LineBasicMaterial({ color: 0x00ff00, linewidth: 3 }));
         scene.add(currentLineMesh);
     }
@@ -543,11 +542,10 @@ function finishFeature() {
         document.getElementById('status').textContent = 'Feature #' + currentFeatId + ' Saved ✓';
     }
 
-    safeDispose(currentPlaneMesh); currentPlaneMesh = null;
-    safeDispose(currentPlaneWireframe); currentPlaneWireframe = null;
-    safeDispose(currentPointsObj); currentPointsObj = null;
-    safeDispose(currentLineMesh); currentLineMesh = null;
-
+    if (currentPlaneMesh) { scene.remove(currentPlaneMesh); safeDispose(currentPlaneMesh); currentPlaneMesh = null; }
+    if (currentPlaneWireframe) { scene.remove(currentPlaneWireframe); safeDispose(currentPlaneWireframe); currentPlaneWireframe = null; }
+    if (currentPointsObj) { scene.remove(currentPointsObj); safeDispose(currentPointsObj); currentPointsObj = null; }
+    if (currentLineMesh) { scene.remove(currentLineMesh); safeDispose(currentLineMesh); currentLineMesh = null; }
     currentPoints = []; currentPlaneCorners = null;
     document.getElementById('collinear-val').textContent = '-';
     document.getElementById('coplanar-val').textContent = '-';
@@ -578,13 +576,14 @@ function calculatePCAAndOrientationJS(pointsGis) {
     nx /= normLen; ny /= normLen; nz /= normLen;
     let dip = Math.acos(Math.min(1.0, Math.abs(nz))) * (180.0 / Math.PI);
 
-    let dnx = nz < 0 ? -nx : nx;
+    let dnx = nz < 0 ? -nx : nx;  // ← Inverti il condition
     let dny = nz < 0 ? -ny : ny;
 
     let dipDir = 0, strike = 0;
     if (Math.abs(dnx) >= 1e-9 || Math.abs(dny) >= 1e-9) {
         dipDir = (Math.atan2(dnx, dny) * (180.0 / Math.PI) + 360.0) % 360.0;
         strike = (dipDir - 90.0 + 360.0) % 360.0;
+        
     }
 
     return {

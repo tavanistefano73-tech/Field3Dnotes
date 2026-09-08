@@ -110,15 +110,15 @@ function selectFeature(featId) {
             if (feat.note_type === 'text') {
                 html += `<div class="popup-info-row"><span class="popup-info-label">Text:</span><span class="popup-info-value" style="color:#17a2b8;">"${feat.text || ''}"</span></div>`;
             } else if (feat.note_type === 'photo') {
-                html += `<div class="popup-info-row" style="display:block;">`;
-                html += `<img src="${feat.photo_data || ''}" class="note-photo-full" onerror="this.outerHTML='<div class=&quot;note-photo-missing&quot;>⚠️ Photo not available</div>';">`;
+                html += `<img src="${feat.photo_data || ''}" class="note-photo-full" style="max-width: 100%; height: auto; margin: 10px 0; cursor: pointer;" onclick="openPhotoViewer('${feat.photo_data || ''}'); event.stopPropagation();" onerror="...">`;
+                html += `<a href="${feat.photo_data || ''}" target="_blank"><img src="${feat.photo_data || ''}" class="note-photo-full" style="max-width: 100%; height: auto; margin: 10px 0;" onerror="this.outerHTML='<div class=&quot;note-photo-missing&quot;>⚠️ Photo not available</div>';"></a>`;
                 if (feat.text) {
                     html += `<div style="margin-top:6px; color:#55ff55; font-size:10px; white-space:pre-wrap;">${feat.text}</div>`;
                 }
                 html += `</div>`;
             } else if (feat.note_type === 'sketch') {
                 html += `<div class="popup-info-row" style="display:block;">`;
-                html += `<img src="${feat.sketch_data || ''}" class="note-photo-full" onerror="this.outerHTML='<div class=&quot;note-photo-missing&quot;>⚠️ Sketch not available</div>';">`;
+                html += `<img src="${feat.sketch_data || ''}" class="note-photo-full" style="max-width: 100%; height: auto; margin: 10px 0; cursor: pointer;" onclick="openPhotoViewer('${feat.sketch_data || ''}'); event.stopPropagation();" onerror="...">`;
                 if (feat.text) {
                     html += `<div style="margin-top:6px; color:#55ff55; font-size:10px; white-space:pre-wrap;">${feat.text}</div>`;
                 }
@@ -216,21 +216,29 @@ function deselectFeature() {
 }
 
 function deleteSelectedFeature() {
-            if (selectedFeatureId === null) return;
-            const featIdx = digitizedFeatures.findIndex(f => f.id === selectedFeatureId);
-            if (featIdx !== -1) {
-                const featToDelete = digitizedFeatures[featIdx];
-                if (featToDelete.is_note && featToDelete.note_type === 'photo' && featToDelete.photo_file) {
-                    deleteNoteMediaFromDisk(featToDelete.photo_file);
-                }
-                safeDispose(featToDelete.group);
-                const delId = featToDelete.id;
-                digitizedFeatures.splice(featIdx, 1);
-                deselectFeature();
-                updateVisibilityFiltersUI(); updateUI();
-                document.getElementById('status').textContent = 'Feature #' + delId + ' Deleted 🗑️';
-            }
+    if (selectedFeatureId === null) return;
+    const featIdx = digitizedFeatures.findIndex(f => f.id === selectedFeatureId);
+    if (featIdx !== -1) {
+        const featToDelete = digitizedFeatures[featIdx];
+        
+        deselectFeature(); // Ripristina il colore
+        
+        if (featToDelete.is_note && featToDelete.note_type === 'photo' && featToDelete.photo_file) {
+            deleteNoteMediaFromDisk(featToDelete.photo_file);
         }
+
+        // RIMUZIONE DALLA SCENA 3D (Rimuove visivamente l'oggetto dal canvas)
+        if (featToDelete.group && featToDelete.group.parent) {
+            featToDelete.group.parent.remove(featToDelete.group);
+        }
+
+        safeDispose(featToDelete.group);
+        const delId = featToDelete.id;
+        digitizedFeatures.splice(featIdx, 1);
+        updateVisibilityFiltersUI(); updateUI();
+        document.getElementById('status').textContent = 'Feature #' + delId + ' Deleted 🗑️';
+    }
+}
 
 // 1. Dynamically generate the Key / Value input row in the DOM
 function addCustomFieldInput(key = '', value = '') {
@@ -287,3 +295,39 @@ function getCustomFieldsValues() {
 
     return customFields;
 }
+// Funzione per espandere / comprimere il menu VRAM & Preset
+window.toggleVRAMAccordion = function() {
+    const content = document.getElementById('vram-accordion-content');
+    const arrow = document.getElementById('vram-accordion-arrow');
+    
+    if (!content || !arrow) return;
+
+    if (content.style.display === 'none') {
+        content.style.display = 'block';
+        arrow.style.transform = 'rotate(90deg)';
+    } else {
+        content.style.display = 'none';
+        arrow.style.transform = 'rotate(0deg)';
+    }
+};
+function openPhotoViewer(dataUri) {
+    try {
+        const arr = dataUri.split(',');
+        const mime = arr[0].match(/:(.*?);/)[1];
+        const str = atob(arr[1]);
+        const n = str.length;
+        const u8arr = new Uint8Array(n);
+        for (let i = 0; i < n; i++) {
+            u8arr[i] = str.charCodeAt(i);
+        }
+        const blob = new Blob([u8arr], { type: mime });
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank');
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+        console.error("Error opening photo:", err);
+        alert("Cannot open photo");
+    }
+}
+
+window.openPhotoViewer = openPhotoViewer;

@@ -147,34 +147,105 @@
     
 }
 
+/* PULSANTI SCHEDE NEL PANNELLO IN ALTO A DESTRA */
+.tab-btn {
+    background: #2a2a2a;
+    border: 1px solid #444;
+    color: #888;
+    padding: 2px 6px;
+    font-size: 9px;
+    font-weight: bold;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.tab-btn:hover {
+    background: #333;
+    color: #fff;
+}
+
+.tab-btn.active {
+    background: #1D9E75;
+    border-color: #1D9E75;
+    color: #fff;
+}
+/* ========== CORRECTED: Tab buttons TOP-RIGHT PANEL ========== */
+.top-tab-btn {
+    flex: 1;
+        text-align: center;
+        background: #2a2a2a;
+    border: 1px solid #444;
+    color: #888;
+    padding: 4px 8px;
+    font-size: 10px;
+    font-weight: bold;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    margin: 0 2px;
+    white-space: nowrap;
+}
+
+.top-tab-btn:hover {
+    background: #333;
+    color: #fff;
+}
+
+.top-tab-btn.active {
+    background: #1D9E75;
+    border-color: #1D9E75;
+    color: #fff;
+}
+.top-tab-content {
+    display: none;
+}
+.top-tab-content.visible {
+    display: block;
+}
+.top-right-tabs {
+    display: flex;
+    gap: 4px;
+    flex: 0 0 70%;
+}
 .top-right-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
     background: rgba(30, 30, 30, 0.95);
-    padding: 2px 6px;
+    padding: 2px 2px;
     border-radius: 6px 6px 0 0;
     border: 1px solid #444;
     border-bottom: none;
+    gap: 2px;
 }
 
-/* Stile handle a pallini uguale a sinistra */
+/* Stile handle a pallini ridimensionato */
 #top-right-container .drag-handle {
     cursor: grab;
-    padding: 0 4px;
+    padding: 0 1px; /* Padding ridotto da 4px a 1px */
     color: #aaa;
     font-weight: bold;
     user-select: none;
     touch-action: none;
-    font-size: 17px;
+    font-size: 13px; /* Ridotto da 17px per risparmiare spazio */
     display: flex;
     align-items: center;
     justify-content: center;
+    flex-shrink: 1;
 }
 
 #top-right-container .drag-handle:active {
     cursor: grabbing;
     color: #1D9E75;
+}
+
+/* Compattamento dei pulsanti e schede all'interno dell'header */
+.top-right-header button,
+.top-right-header .top-tab-btn {
+    padding: 2px 3px !important;
+    margin: 0 !important;
+    min-width: 0 !important;
 }
 
 /* Gestione visibilità contenuto quando compresso */
@@ -187,10 +258,11 @@
     border-bottom: 1px solid #444;
 }
 
-#declination-ui, #sensor-ui, #polyline-metrics-ui {
+
+#declination-ui, #sensor-ui, #polyline-metrics-ui, #perf-controls-ui {
     pointer-events: auto;
     background: rgba(25, 25, 25, 0.95);
-    padding: 5px 4px; /* Padding compatto per guadagnare spazio */
+    padding: 5px 4px;
     border-radius: 8px;
     box-shadow: 0 4px 12px rgba(0,0,0,0.5);
     font-size: 10px;
@@ -412,10 +484,12 @@
             z-index: 5000;
             flex-direction: column;
             overflow: hidden;
+            pointer-events: auto !important;
         }
 
         #stereonet-window.show {
             display: flex;
+            pointer-events: auto !important;  
         }
 
         #stereonet-header {
@@ -866,10 +940,27 @@ body.light-theme #top-right-container .drag-handle,
 body.light-theme .drag-handle {
     color: #000000 !important;
 }
+/* PULSANTI SCHEDE TEMA CHIARO */
+body.light-theme .top-tab-btn {
+    background: #ffffff !important;
+    border-color: #94a3b8 !important;
+    color: #000000 !important;
+}
 
+body.light-theme .top-tab-btn:hover {
+    background: #e2e8f0 !important;
+    color: #0f6e56 !important;
+}
+
+body.light-theme .top-tab-btn.active {
+    background: #1D9E75 !important;
+    border-color: #1D9E75 !important;
+    color: #ffffff !important;
+}
 body.light-theme #declination-ui,
 body.light-theme #sensor-ui,
-body.light-theme #polyline-metrics-ui {
+body.light-theme #polyline-metrics-ui,
+body.light-theme #perf-controls-ui {
     background: rgba(255, 255, 255, 0.98) !important;
     border-color: #0f6e56 !important;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12) !important;
@@ -1220,12 +1311,9 @@ body.light-theme #clipping-ui .popup-close-btn:hover,
     color: #000;
 }
 
-/* Button pressed/unpressed states */
-#btn-gps-toggle.pressed {
-    background-color: #1D9E75 !important;
-    color: #fff !important;
-    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3) !important;
+
 }
+
 
 #btn-gps-toggle:not(.pressed) {
     background-color: #2a2a2a !important;
@@ -1237,3 +1325,355 @@ body.light-theme #clipping-ui .popup-close-btn:hover,
     top: max(60px, env(safe-area-inset-top) + 50px) !important;
     transition: top 0.2s ease-in-out;
 }toggle
+
+/* ==========================================
+   STEREONET ADAPTIVE FULLSCREEN & CONTROLS FIX
+   ========================================== */
+
+#stereonet-window {
+  position: absolute !important;
+  z-index: 1000 !important;
+  background-color: rgba(20, 20, 20, 0.95) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6) !important;
+  box-sizing: border-box !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+}
+
+/* Gestione dei controlli: abilita lo scroll se il contenuto supera l'altezza */
+#stereonet-controls {
+  overflow-y: auto !important;
+  max-height: 100% !important;
+  padding: 10px !important;
+  box-sizing: border-box !important;
+}
+
+#stereonet-container {
+  display: flex !important;
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+#stereonet-canvas-wrapper {
+  flex: 1 1 auto !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+}
+
+#stereonet-canvas {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
+}
+
+/* 1. LAYOUT PORTRAIT (Verticale - Layout a colonna) */
+@media screen and (orientation: portrait) {
+  #stereonet-window {
+    top: 2vh !important;
+    bottom: 2vh !important;
+    left: 2vw !important;
+    right: 2vw !important;
+    width: 96vw !important;
+    height: 96vh !important;
+  }
+  
+  #stereonet-container {
+    flex-direction: column !important;
+  }
+  
+  #stereonet-controls {
+    width: 100% !important;
+    max-height: 35vh !important;
+  }
+}
+
+/* 2. LAYOUT LANDSCAPE (Orizzontale - Massimizzato + Controlli affiancati a destra) */
+@media screen and (orientation: landscape) {
+  #stereonet-window {
+    top: 2vh !important;
+    bottom: 2vh !important;
+    left: 2vw !important;
+    right: 2vw !important;
+    width: 96vw !important;
+    height: 96vh !important;
+  }
+  
+  /* Dispone Canvas e Controlli affiancati */
+  #stereonet-container {
+    flex-direction: row !important;
+  }
+  
+  #stereonet-canvas-wrapper {
+    flex: 1 1 65% !important; /* Il grafico occupa il 65% dello spazio disponibile */
+  }
+  
+  #stereonet-controls {
+    flex: 0 0 35% !important; /* I controlli occupano il 35% sulla destra */
+    border-left: 1px solid rgba(255, 255, 255, 0.1) !important;
+  }
+}
+/* Corregge il clipping della colorbar e attiva lo scroll verticale dei controlli */
+#stereonet-canvas-wrapper {
+  padding-bottom: 35px !important; /* Spazio extra in basso per le etichette delle percentuali */
+  overflow: visible !important;
+}
+
+#stereonet-controls {
+  max-height: 45vh !important;
+  overflow-y: auto !important; /* Abilita lo scroll se i controlli superano la vista */
+  padding-bottom: 15px !important;
+}
+/* Espansione della colonna controlli in modalità Landscape */
+@media screen and (orientation: landscape) {
+  #stereonet-controls {
+    max-height: 85vh !important; /* Aumenta l'altezza visibile fino all'85% della schermata */
+    height: 100% !important;
+    overflow-y: auto !important; /* Mantiene lo scroll attivo se necessario */
+  }
+}
+
+
+/* Pannello laterale destro */
+.alt-slider-panel {
+  position: absolute;
+  right: 15px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1000;
+  
+  background: rgba(20, 20, 20, 0.75);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  
+  padding: 12px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: #ffffff;
+  font-family: system-ui, -apple-system, sans-serif;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.alt-label-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #aaaaaa;
+}
+
+.slider-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 320px;
+  gap: 4px;
+}
+
+.alt-limit {
+  font-size: 9px;
+  color: #888888;
+}
+
+/* Stylings per lo Slider Verticale (Compatibilità Cross-Browser e Touch) */
+.alt-slider-panel input[type="range"] {
+  -webkit-appearance: slider-vertical;
+  writing-mode: bt-lr; /* IE/Edge */
+  width: 16px;
+  height: 240px;
+  cursor: pointer;
+  accent-color: #00ffff; /* Colore cyan coerente col pallino GPS */
+}
+
+.alt-value-display {
+  font-size: 11px;
+  font-weight: 600;
+  color: #00ffff;
+  background: rgba(0, 0, 0, 0.4);
+  padding: 2px 6px;
+  border-radius: 4px;
+  min-width: 42px;
+  text-align: center;
+}
+
+.btn-alt-reset {
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  color: #fff;
+  border-radius: 50%;
+  width: 22px;
+  height: 22px;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+}
+
+.btn-alt-reset:active {
+  background: rgba(0, 255, 255, 0.4);
+}
+
+
+/* Pulsante Snap in stato attivo */
+.btn-alt-reset.active-snap {
+  position: relative;
+  background: #222 !important;
+}
+
+/* Anello Pulsante Verde (Terreno trovato) */
+.btn-alt-reset.snap-success::after {
+  content: '';
+  position: absolute;
+  top: -4px; left: -4px; right: -4px; bottom: -4px;
+  border-radius: 50%;
+  border: 2px solid #00ff66;
+  animation: pulse-ring-green 1.5s infinite;
+  pointer-events: none;
+}
+
+/* Anello Pulsante Rosso (Terreno NON trovato) */
+.btn-alt-reset.snap-fail::after {
+  content: '';
+  position: absolute;
+  top: -4px; left: -4px; right: -4px; bottom: -4px;
+  border-radius: 50%;
+  border: 2px solid #ff3333;
+  animation: pulse-ring-red 1.5s infinite;
+  pointer-events: none;
+}
+
+@keyframes pulse-ring-green {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 255, 102, 0.7); }
+  70% { transform: scale(1.15); box-shadow: 0 0 0 6px rgba(0, 255, 102, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 255, 102, 0); }
+}
+
+@keyframes pulse-ring-red {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 51, 51, 0.7); }
+  70% { transform: scale(1.15); box-shadow: 0 0 0 6px rgba(255, 51, 51, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 51, 51, 0); }
+}
+
+/* Blocco grafico dello slider quando congelato */
+.slider-frozen {
+  opacity: 0.35 !important;
+  pointer-events: none !important;
+  filter: grayscale(100%);
+}
+
+/* Contenitore rettangolare per i pulsanti Perf */
+.perf-presets-container {
+    background: rgba(25, 25, 25, 0.95);
+    padding: 6px 6px;
+    border-radius: 4px;
+    border: 1px solid #1D9E75;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+}
+
+/* Bottoni Preset allineati al pannello sensori */
+.vram-btn-compact {
+    background: #222;
+    color: #fff;
+    border: 1px solid #444;
+    padding: 3px 2px;
+    border-radius: 3px;
+    font-size: 9px;
+    font-weight: bold;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.2s;
+}
+
+.vram-btn-compact:hover,
+.vram-btn-compact.active {
+    background: #1D9E75;
+    border-color: #1D9E75;
+    color: #fff;
+}
+
+/* Compatibilità Tema Chiaro */
+body.light-theme #vram-perf-integrated-ui {
+    border-top-color: #ccc !important;
+}
+
+body.light-theme #vram-perf-integrated-ui div[style*="background"] {
+    background: rgba(0, 0, 0, 0.05) !important;
+}
+
+body.light-theme .vram-btn-compact {
+    background: #fff;
+    color: #333;
+    border-color: #ccc;
+}
+
+body.light-theme .vram-btn-compact:hover {
+    background: #0f6e56;
+    color: #fff;
+}
+
+/* ==========================================
+   PULSANTE DECL° E INPUT BOX DECLINAZIONE
+   ========================================== */
+
+#btn-load-declination,
+#input-declination {
+    display: inline-block !important;
+    vertical-align: middle !important;
+    position: static !important;
+    transform: none !important;
+    box-sizing: border-box !important;
+    margin: 0 !important;
+}
+
+#btn-load-declination {
+    height: 22px !important;
+    width: 45px !important;      /* Larghezza forzata del pulsante */
+    min-width: 0 !important;
+    padding: 0 !important;
+    font-size: 10px;
+    font-weight: bold;
+    background: #2a2a2a;
+    border: 1px solid #444;
+    color: #fff;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+#input-declination {
+    height: 22px !important;
+    width: 45px !important;      /* Larghezza forzata dell'input box */
+    min-width: 0 !important;     /* Rimuove il blocco di larghezza minima del browser */
+    padding: 0 2px !important;
+    font-size: 10px;
+    background: #2a2a2a;
+    border: 1px solid #444;
+    color: #fff;
+    border-radius: 4px;
+    text-align: center;
+    margin-left: 10px !important; /* Distanza dal pulsante */
+}
+
+/* Override automatico per Tema Chiaro */
+body.light-theme #btn-load-declination,
+body.light-theme #input-declination {
+    background: #ffffff !important;
+    border-color: #94a3b8 !important;
+    color: #000000 !important;
+}
+
+

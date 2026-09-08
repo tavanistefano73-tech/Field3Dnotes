@@ -1,5 +1,35 @@
 const DRACO_LOCAL_PATH = new URL('js/libs/draco/', window.location.href).href;
+/**
+ * Pulizia essenziale della VRAM per la memoria GPU.
+ * Rilascia le risorse di geometrie e texture senza alterare i buffer dati.
+ */
+function safeDispose(object) {
+    if (!object) return;
 
+    object.traverse((child) => {
+        if (!child.isMesh && !child.isPoints && !child.isLine) return;
+
+        // 1. Rilascia la geometria GPU
+        if (child.geometry) {
+            child.geometry.dispose();
+        }
+
+        // 2. Rilascia i materiali e le relative texture GPU
+        if (child.material) {
+            const materials = Array.isArray(child.material) ? child.material : [child.material];
+            
+            materials.forEach((mat) => {
+                // Scansione e rilascio delle texture allocate
+                for (const key in mat) {
+                    if (mat[key] && mat[key].isTexture) {
+                        mat[key].dispose();
+                    }
+                }
+                mat.dispose();
+            });
+        }
+    });
+}
 /**
  * 03-model-loading.js
  * Modulo per il caricamento dei modelli 3D.
@@ -364,16 +394,42 @@ function resetFeaturesAndTiles() {
     try {
         window.tilesInitialized = false;
 
-        if (typeof cancelCurrentDigitizing === 'function') cancelCurrentDigitizing();
+        if (typeof THREE !== 'undefined' && THREE.Cache) {
+            THREE.Cache.clear();
+        }
+
+        // Annulla l'operazione di digitalizzazione in corso
+        if (typeof cancelCurrentDigitizing === 'function') {
+            cancelCurrentDigitizing();
+        }
+
+        // Rimuove e pulisce eventuali geometrie temporanee/anteprime rimaste orfane nella scena
+        if (typeof currentLineGraphic !== 'undefined' && currentLineGraphic) {
+            if (typeof scene !== 'undefined' && scene) scene.remove(currentLineGraphic);
+            safeDispose(currentLineGraphic);
+            currentLineGraphic = null;
+        }
+
+        if (typeof tempLineGroup !== 'undefined' && tempLineGroup) {
+            if (typeof scene !== 'undefined' && scene) scene.remove(tempLineGroup);
+            safeDispose(tempLineGroup);
+            tempLineGroup = null;
+        }
+
+        if (typeof tempPointGraphic !== 'undefined' && tempPointGraphic) {
+            if (typeof scene !== 'undefined' && scene) scene.remove(tempPointGraphic);
+            safeDispose(tempPointGraphic);
+            tempPointGraphic = null;
+        }
+
         if (typeof deselectFeature === 'function') deselectFeature();
 
+        // Pulizia completa delle feature già digitalizzate
         if (typeof digitizedFeatures !== 'undefined' && Array.isArray(digitizedFeatures)) {
             digitizedFeatures.forEach(f => {
                 if (f && f.group && typeof scene !== 'undefined' && scene) {
                     scene.remove(f.group);
-                    if (typeof safeDispose === 'function') {
-                        safeDispose(f.group);
-                    }
+                    safeDispose(f.group);
                 }
             });
             digitizedFeatures.length = 0;
@@ -581,64 +637,78 @@ function onCRSChanged() {
 
 async function load3TZ(file) {
     try {
-        console.log("🔵 3TZ loading started...");
-
+        console.log("🔵 3TZ loading started... File size:", Math.round(file.size / 1024 / 1024 / 1024 * 100) / 100, "GB");
+        
         const TilesRenderer = window.TilesRenderer || window.TilesRendererLib?.TilesRenderer;
         if (!window.TilesRenderer) {
-            console.error("❌ TilesRenderer not loaded");
             alert("Error: TilesRenderer library is not loaded.");
-            document.getElementById('status').textContent = '3TZ Error';
             return;
         }
 
-        const zip = await JSZip.loadAsync(file);
+        if (typeof zip === 'undefined' || !zip.ZipReader) {
+            alert("Error: zip.js library is not loaded. Add zip.min.js to your HTML file!");
+            return;
+        }
+
+        // 1. Inizializza il lettore in modalità Random-Access (usa file.slice(), RAM quasi a zero)
+        console.log("📦 Parsing ZIP directory with zip.js...");
+        const zipReader = new zip.ZipReader(new zip.BlobReader(file));
+        const entries = await zipReader.getEntries();
+        console.log("✅ ZIP index parsed! Total files:", entries.length);
+
+        // 2. Mappa l'indice dei file
         let possibleTilesets = [];
-        zip.forEach((relPath, entry) => {
-            if (!entry.dir && relPath.toLowerCase().endsWith('tileset.json')) {
-                possibleTilesets.push({ path: relPath, entry: entry });
+        const zipIndex = new Map();
+        
+        for (const entry of entries) {
+            if (!entry.directory) {
+                const normPath = entry.filename.replace(/\\/g, '/').toLowerCase();
+                zipIndex.set(normPath, entry);
+                if (normPath.endsWith('tileset.json')) {
+                    possibleTilesets.push({ path: entry.filename, entry: entry });
+                }
             }
-        });
+        }
 
         if (possibleTilesets.length === 0) {
             alert("Error: No tileset.json found in ZIP!");
-            document.getElementById('status').textContent = '3TZ Error';
+            await zipReader.close();
             return;
         }
 
         possibleTilesets.sort((a, b) => a.path.length - b.path.length);
         const rootTilesetData = possibleTilesets[0];
-        const rootTilesetText = await rootTilesetData.entry.async('string');
+        console.log("📍 Using tileset:", rootTilesetData.path);
 
+        // Estrazione MIRATA solo del file JSON principale (pochi KB)
+        const rootTilesetText = await rootTilesetData.entry.getData(new zip.TextWriter());
+        
         try {
             const parsedTileset = JSON.parse(rootTilesetText);
-            if (parsedTileset && parsedTileset.root && parsedTileset.root.boundingVolume) {
+            if (parsedTileset?.root?.boundingVolume) {
                 const bv = parsedTileset.root.boundingVolume;
                 let estimatedCRS = null;
                 if (bv.box) estimatedCRS = estimateCRSFromCoords(bv.box[0], bv.box[1]);
                 else if (bv.sphere) estimatedCRS = estimateCRSFromCoords(bv.sphere[0], bv.sphere[1]);
                 else if (bv.region) estimatedCRS = "EPSG:4326";
                 populateCRSDropdown(estimatedCRS);
-            } else {
-                populateCRSDropdown(null);
             }
         } catch (e) {
-            populateCRSDropdown(null);
+            console.warn("Could not parse tileset metadata");
         }
 
         const lastSlashIdx = rootTilesetData.path.lastIndexOf('/');
         const zipPrefix = lastSlashIdx !== -1 ? rootTilesetData.path.substring(0, lastSlashIdx + 1).toLowerCase() : "";
 
-        const zipIndex = new Map();
-        zip.forEach((relPath, entry) => {
-            if (entry.dir) return;
-            const normPath = relPath.replace(/\\/g, '/').toLowerCase();
-            zipIndex.set(normPath, entry);
-        });
-
+        // Pulizia sessioni e file precedenti
         if (window.active3dTiles) {
             scene.remove(window.active3dTiles.group);
             window.active3dTiles.dispose();
             window.active3dTiles = null;
+        }
+        if (window.activeZipReader) {
+            try { await window.activeZipReader.close(); } catch(e) {}
+            window.activeZipReader = null;
         }
         if (loadedMesh) {
             if (typeof safeDispose === 'function') safeDispose(loadedMesh);
@@ -648,57 +718,68 @@ async function load3TZ(file) {
             window.fetch = window.active3dTilesOriginalFetch;
         }
 
+        window.activeZipReader = zipReader;
+
+        // 3. Custom fetch: estrae dal file da 2.5GB SOLO la singola tile richiesta al momento
         const originalFetch = window.fetch;
         window.fetch = async (input, init) => {
-            const urlStr = typeof input === 'string' ? input : (input ? input.url : '');
+            const urlStr = typeof input === 'string' ? input : (input?.url || '');
 
-            if (urlStr.includes('local-3tz-storage')) {
-                try {
-                    const parsedUrl = new URL(urlStr);
-                    let requestedPath = decodeURIComponent(parsedUrl.pathname)
-                        .replace(/^\/local-3tz-storage\/?/, '')
-                        .replace(/^\//, '')
-                        .replace(/\\/g, '/')
-                        .toLowerCase();
-
-                    if (requestedPath === '' || requestedPath === 'tileset.json') {
-                        return new Response(rootTilesetText, {
-                            status: 200,
-                            headers: { 'Content-Type': 'application/json' }
-                        });
-                    }
-
-                    let rawZipPath = zipPrefix + requestedPath;
-                    const parts = [];
-                    for (const segment of rawZipPath.split('/')) {
-                        if (segment === '..') {
-                            if (parts.length > 0) parts.pop();
-                        } else if (segment !== '.' && segment !== '') {
-                            parts.push(segment);
-                        }
-                    }
-                    const finalZipPath = parts.join('/');
-                    const targetEntry = zipIndex.get(finalZipPath);
-                    if (targetEntry) {
-                        if (finalZipPath.endsWith('.json')) {
-                            const jsonText = await targetEntry.async('string');
-                            return new Response(jsonText, { headers: { 'Content-Type': 'application/json' } });
-                        }
-                        const buffer = await targetEntry.async('arraybuffer');
-                        return new Response(buffer, { status: 200 });
-                    }
-                    return new Response(null, { status: 404 });
-                } catch (e) {
-                    return new Response(null, { status: 500 });
-                }
+            if (!urlStr.includes('local-3tz-storage')) {
+                return originalFetch(input, init);
             }
-            return originalFetch(input, init);
+
+            try {
+                const parsedUrl = new URL(urlStr);
+                let requestedPath = decodeURIComponent(parsedUrl.pathname)
+                    .replace(/^\/local-3tz-storage\/?/, '')
+                    .replace(/^\//, '')
+                    .replace(/\\/g, '/')
+                    .toLowerCase();
+
+                if (!requestedPath || requestedPath === 'tileset.json') {
+                    return new Response(rootTilesetText, {
+                        status: 200,
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                }
+
+                let rawZipPath = zipPrefix + requestedPath;
+                const parts = [];
+                for (const segment of rawZipPath.split('/')) {
+                    if (segment === '..') {
+                        if (parts.length > 0) parts.pop();
+                    } else if (segment && segment !== '.') {
+                        parts.push(segment);
+                    }
+                }
+                const finalZipPath = parts.join('/');
+
+                const targetEntry = zipIndex.get(finalZipPath);
+                if (!targetEntry) {
+                    return new Response(null, { status: 404 });
+                }
+
+                // Estrazione diretta on-demand del singolo file
+                if (finalZipPath.endsWith('.json')) {
+                    const jsonText = await targetEntry.getData(new zip.TextWriter());
+                    return new Response(jsonText, { status: 200, headers: { 'Content-Type': 'application/json' } });
+                } else {
+                    const uint8Array = await targetEntry.getData(new zip.Uint8ArrayWriter());
+                    return new Response(uint8Array.buffer, { status: 200 });
+                }
+            } catch (e) {
+                console.error("Fetch error:", e);
+                return new Response(null, { status: 500 });
+            }
         };
 
+        // 4. Creazione ed esecuzione TilesRenderer
+        console.log("🎬 Creating TilesRenderer...");
         const tilesRenderer = new window.TilesRenderer('https://local-3tz-storage/tileset.json');
+        
         tilesRenderer.setCamera(camera);
         tilesRenderer.setResolutionFromRenderer(camera, renderer);
-
         tilesRenderer.errorTarget = 6.0;
         tilesRenderer.stopAtLoaded = true;
         tilesRenderer.cullWithFrustum = true;
@@ -706,8 +787,8 @@ async function load3TZ(file) {
         tilesRenderer.maxDownloads = 16;
 
         if (tilesRenderer.lruCache) {
-            tilesRenderer.lruCache.minSize = 1000;
-            tilesRenderer.lruCache.maxSize = 3500;
+            tilesRenderer.lruCache.minSize = 70;
+            tilesRenderer.lruCache.maxSize = 200;
         }
 
         if (typeof THREE.DRACOLoader !== 'undefined') {
@@ -720,102 +801,102 @@ async function load3TZ(file) {
 
         tilesRenderer.onLoadModel = (sceneObj) => {
             sceneObj.traverse((c) => {
-                if (c.isMesh) {
-                    c.frustumCulled = false;
-                    if (c.material) {
-                        const mats = Array.isArray(c.material) ? c.material : [c.material];
-                        mats.forEach(m => m.side = THREE.DoubleSide);
-                    }
+                if (c.isMesh && c.material) {
+                    const mats = Array.isArray(c.material) ? c.material : [c.material];
+                    mats.forEach(m => m.side = THREE.DoubleSide);
                 }
             });
         };
 
-        tilesRenderer.onLoadTileSet = async () => {
-            if (window.tilesInitialized) return;
+                    tilesRenderer.onLoadTileSet = async () => {
+                        if (window.tilesInitialized) return;
 
-            tilesRenderer.group.position.set(0, 0, 0);
-            tilesRenderer.group.rotation.set(0, 0, 0);
-            tilesRenderer.group.scale.set(1, 1, 1);
-            tilesRenderer.group.updateMatrixWorld(true);
+                        tilesRenderer.group.position.set(0, 0, 0);
+                        tilesRenderer.group.rotation.set(0, 0, 0);
+                        tilesRenderer.group.scale.set(1, 1, 1);
+                        tilesRenderer.group.updateMatrixWorld(true);
 
-            const crsInput = document.getElementById('input-crs');
-            const crsValue = crsInput ? crsInput.value.trim() : 'Local';
-            const isUtmOrGeoref = crsValue && !crsValue.toLowerCase().includes('local');
-            const sphere = new THREE.Sphere();
-            if (tilesRenderer.getBoundingSphere(sphere)) {
+                        const sphere = new THREE.Sphere();
+                        if (tilesRenderer.getBoundingSphere(sphere)) {
+                            // 1. Riconoscimento della zona UTM
+                            const estimatedCRS = estimateCRSFromCoords(sphere.center.x, sphere.center.y, sphere.center.z);
+                            if (estimatedCRS) {
+                                populateCRSDropdown(estimatedCRS);
+                            }
 
-                if (isUtmOrGeoref) {
-                    autoShift = sphere.center.clone();
+                            // 2. Rotazione di -90° sull'asse X per orientare il modello
+                            tilesRenderer.group.rotation.x = -Math.PI / 2;
+                            window.modelUpAxisIsY = true;
 
-                    tilesRenderer.group.rotation.x = -Math.PI / 2;
-                    tilesRenderer.group.updateMatrixWorld(true);
+                            autoShift = new THREE.Vector3(sphere.center.x, sphere.center.z, -sphere.center.y);
+                                    threeCenter = autoShift.clone();        // 👈 Aggiorna la variabile usata da 04-digitizing.js per le misure
+                                    window.threeCenter = threeCenter;       // 👈 Mantiene la sincronizzazione per 11-imhere.js
 
-                    tilesRenderer.group.position.copy(autoShift).negate();
-                    tilesRenderer.group.updateMatrixWorld(true);
-                } else {
-                    tilesRenderer.group.rotation.x = -Math.PI / 2;
-                    window.modelUpAxisIsY = true;
-                    autoShift = new THREE.Vector3(
-                        sphere.center.x,
-                        sphere.center.z,
-                        -sphere.center.y
-                    );
-                    tilesRenderer.group.position.copy(autoShift).negate();
-                    tilesRenderer.group.updateMatrixWorld(true);
-                }
+                                    tilesRenderer.group.position.copy(autoShift).negate();
+                                    tilesRenderer.group.updateMatrixWorld(true);
 
-                threeCenter = autoShift.clone();
-                window.threeCenter = threeCenter;
-                const box = new THREE.Box3().setFromObject(tilesRenderer.group);
-                autoShift = box.getCenter(new THREE.Vector3());
-                console.log("✅ 3TZ - Bounding Box center:", autoShift);
-                window.threeCenter = threeCenter;
+                                    // 4. Calcolo del Bounding Box finale per la telecamera (senza sovrascrivere threeCenter)
+                                    const box = new THREE.Box3().setFromObject(tilesRenderer.group);
+                            const radius = Math.max(sphere.radius || 50, 50);
+                            camera.near = 0.1;
+                            camera.far = Math.max(100000, radius * 50);
+                            camera.updateProjectionMatrix();
 
-                const radius = sphere.radius || 50;
-                camera.near = 0.1;
-                camera.far = Math.max(100000, radius * 50);
-                camera.updateProjectionMatrix();
+                            controls.target.set(0, 0, 0);
+                            camera.position.set(0, radius * 1.5, radius * 1.5);
+                            controls.update();
+                        }
 
-                controls.target.set(0, 0, 0);
-                camera.position.set(0, radius * 1.5, radius * 1.5);
-                controls.update();
-            }
-
-            loadedMesh = tilesRenderer.group;
-
-            onCRSChanged();
-            document.getElementById('status').textContent = '3TZ Model Loaded ✓ | CRS: ' + crsValue;
-            document.getElementById('status').style.color = '#1D9E75';
-
-            window.tilesInitialized = true;
-        };
+                        loadedMesh = tilesRenderer.group;
+                        onCRSChanged();
+                        
+                        const crsInput = document.getElementById('input-crs');
+                        const crsValue = crsInput?.value.trim() || 'Local';
+                        document.getElementById('status').textContent = `✅ 3TZ Loaded | CRS: ${crsValue}`;
+                        document.getElementById('status').style.color = '#1D9E75';
+                        window.tilesInitialized = true;
+                    };
 
         scene.add(tilesRenderer.group);
         window.active3dTiles = tilesRenderer;
         window.active3dTilesOriginalFetch = originalFetch;
 
+        console.log("✅ 3TZ setup complete, waiting for tiles...");
+        document.getElementById('status').textContent = '⏳ Loading tiles...';
+
     } catch (err) {
         console.error("🔴 3TZ ERROR:", err);
-        alert("3TZ load error: " + err.message);
-        document.getElementById('status').textContent = '3TZ Error';
+        alert("3TZ Error: " + err.message);
+        document.getElementById('status').textContent = '❌ 3TZ Error';
         document.getElementById('status').style.color = '#ff4444';
-
+        
         if (window.active3dTilesOriginalFetch) {
             window.fetch = window.active3dTilesOriginalFetch;
         }
     }
 }
-
 async function handleFileUpload(files) {
    
     const sketchfabPanel = document.getElementById('sketchfab-import-panel');
-    if (sketchfabPanel) sketchfabPanel.style.display = 'none';
-    
-    
-    
-    if (!files || files.length === 0) return;
-    
-    resetFeaturesAndTiles();
+        if (sketchfabPanel) sketchfabPanel.style.display = 'none';
+        
+        if (!files || files.length === 0) return;
+        
+        // Rimuove e pulisce il modello precedente prima di caricare il nuovo
+        if (typeof loadedMesh !== 'undefined' && loadedMesh) {
+            if (typeof scene !== 'undefined' && scene) scene.remove(loadedMesh);
+            safeDispose(loadedMesh);
+            loadedMesh = null;
+        }
+
+        if (window.active3dTiles) {
+            if (typeof scene !== 'undefined' && scene) scene.remove(window.active3dTiles.group);
+            if (window.active3dTiles.dispose) window.active3dTiles.dispose();
+            safeDispose(window.active3dTiles.group);
+            window.active3dTiles = null;
+        }
+
+        resetFeaturesAndTiles();
     
     document.getElementById('status').textContent = 'Processing local file...';
     document.getElementById('status').style.color = '#e0a800';
@@ -847,6 +928,15 @@ async function handleFileUpload(files) {
 
     const ext = mainFile.name.split('.').pop().toLowerCase();
 
+    if (typeof THREE !== 'undefined' && THREE.Cache) {
+            if (ext === '3tz') {
+                THREE.Cache.enabled = false; // Disattivata solo per 3TZ
+            } else {
+                THREE.Cache.enabled = true;  // Riattivata per GLB, GLTF, OBJ, PLY
+            }
+        }
+    
+    
     if (ext === '3tz') {
         await load3TZ(mainFile);
 
@@ -854,11 +944,12 @@ async function handleFileUpload(files) {
         await loadPLY(mainFile);
 
     } else if (ext === 'glb' || ext === 'gltf') {
+     
         const loader = new THREE.GLTFLoader();
         
         if (typeof THREE.DRACOLoader !== 'undefined') {
             const dracoLoader = new THREE.DRACOLoader();
-            dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+            dracoLoader.setDecoderPath(DRACO_LOCAL_PATH);
             loader.setDRACOLoader(dracoLoader);
         }
 
@@ -926,6 +1017,8 @@ function showAxisDialog() {
     });
 }
 
+
+
 async function onModelLoaded(object, presetOffset = null) {
     const axisUpIsY = await showAxisDialog();
     window.modelUpAxisIsY = axisUpIsY;
@@ -980,6 +1073,7 @@ async function loadPLY(file) {
         console.log("🔵 PLY (Point Cloud) loading started...");
         
         if (loadedMesh) {
+            if (typeof scene !== 'undefined' && scene) scene.remove(loadedMesh);
             if (typeof safeDispose === 'function') safeDispose(loadedMesh);
             loadedMesh = null;
         }

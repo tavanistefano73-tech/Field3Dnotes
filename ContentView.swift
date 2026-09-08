@@ -191,31 +191,42 @@ struct WebContainer: UIViewRepresentable {
             
             motionManager.deviceMotionUpdateInterval = 1.0 / 30.0
             
+            // 🔥 FORZA NORD MAGNETICO - Non fallback!
             let availableFrames = CMMotionManager.availableAttitudeReferenceFrames()
-            let referenceFrame: CMAttitudeReferenceFrame = availableFrames.contains(.xMagneticNorthZVertical)
-                ? .xMagneticNorthZVertical
-                : .xArbitraryCorrectedZVertical
+            guard availableFrames.contains(.xMagneticNorthZVertical) else {
+                print("❌ ERRORE: xMagneticNorthZVertical non disponibile su questo device!")
+                return
+            }
+            let referenceFrame: CMAttitudeReferenceFrame = .xMagneticNorthZVertical
+            
+            print("✅ Forzando xMagneticNorthZVertical (NORD MAGNETICO)")
             
             motionManager.startDeviceMotionUpdates(using: referenceFrame, to: .main) { [weak self] motion, error in
                 guard let motion = motion, error == nil else { return }
                 
+                // 🔍 DEBUG: Verifica che il magnetometro è calibrato
+                let magAccuracy = motion.magneticField.accuracy
+                let m = motion.magneticField.field
+                let isMagAvailable = magAccuracy != .uncalibrated && (m.x != 0 || m.y != 0 || m.z != 0)
+                
+                print("🧲 Mag Accuracy: \(magAccuracy.rawValue), Available: \(isMagAvailable)")
+                
                 let (strike, dipDir, dip, rake, trend, plunge) = self?.calculateGeologicalOrientation(motion: motion) ?? (0, 0, 0, 0, 0, 0)
 
-                let jsCode = "if (window.handleNativeSensors) { window.handleNativeSensors(\(strike), \(dipDir), \(dip), \(rake), \(trend), \(plunge)); }"
+                let isFaceDown = motion.gravity.z > 0
+                
+                // Aggiungi flag per indicare quale funzione è stata usata
+                let usingMagnetometer = isMagAvailable ? 1 : 0
+                let jsCode = "if (window.handleNativeSensors) { window.handleNativeSensors(\(strike), \(dipDir), \(dip), \(rake), \(trend), \(plunge), \(isFaceDown), \(usingMagnetometer)); }"
                 
                 self?.webView?.evaluateJavaScript(jsCode, completionHandler: nil)
             }
         }
         
         func calculateGeologicalOrientation(motion: CMDeviceMotion) -> (strike: Int, dipDir: Int, dip: Int, rake: Int, trend: Int, plunge: Int) {
-            let g = motion.gravity
-            let m = motion.magneticField.field
-            
-            if motion.magneticField.accuracy != .uncalibrated && (m.x != 0 || m.y != 0 || m.z != 0) {
-                return calculateFromDirectSensors(g: g, m: m)
-            } else {
-                return calculateFromRotationMatrix(motion: motion)
-            }
+            // 🔥 IMPORTANTE: Con .xMagneticNorthZVertical, la matrice di rotazione è già
+            // riferita al nord magnetico. Usa SOLO quella, non il magnetometro grezzo!
+            return calculateFromRotationMatrix(motion: motion)
         }
         
         private func calculateFromDirectSensors(g: CMAcceleration, m: CMMagneticField) -> (strike: Int, dipDir: Int, dip: Int, rake: Int, trend: Int, plunge: Int) {
@@ -243,7 +254,9 @@ struct WebContainer: UIViewRepresentable {
             let dipRad = acos(min(max(abs(nUp), 0.0), 1.0))
             let dipDeg = dipRad * 180.0 / .pi
             
-            var dipDirDeg = atan2(nEast, nNorth) * 180.0 / .pi - magneticDeclination
+            var dipDirDeg = atan2(nNorth, nEast) * 180.0 / .pi
+            
+            
             if dipDirDeg < 0 { dipDirDeg += 360.0 }
             if dipDirDeg >= 360 { dipDirDeg -= 360.0 }
             
@@ -265,7 +278,7 @@ struct WebContainer: UIViewRepresentable {
             var teE = east.1, teN = north.1, teU = up.1
             if teU > 0 { teE = -teE; teN = -teN; teU = -teU }
 
-            var trendDeg = atan2(teE, teN) * 180.0 / .pi - magneticDeclination
+            var trendDeg = atan2(teN, teE) * 180.0 / .pi
             if trendDeg < 0 { trendDeg += 360.0 }
             if trendDeg >= 360 { trendDeg -= 360.0 }
 
@@ -290,48 +303,78 @@ struct WebContainer: UIViewRepresentable {
         private func calculateFromRotationMatrix(motion: CMDeviceMotion) -> (strike: Int, dipDir: Int, dip: Int, rake: Int, trend: Int, plunge: Int) {
             let r = motion.attitude.rotationMatrix
             
-            let Nx = r.m13
-            let Ny = r.m23
-            let Nz = r.m33
+            let nNorth_raw = r.m31        
+            let nEast_raw  = -r.m32       
+            let nUp_raw    = r.m33        
             
-            let dipRad = acos(min(max(abs(Nz), 0.0), 1.0))
+            let dipRad = acos(min(max(abs(nUp_raw), 0.0), 1.0))
             let dipDeg = dipRad * 180.0 / .pi
             
-            var dipDirDeg = atan2(Nx, Ny) * 180.0 / .pi - magneticDeclination
+            // 🔥 SINCRONIZZA con la logica del JavaScript: usa motion.gravity.z > 0
+            let isFaceDown = motion.gravity.z > 0
+            let nNorth = isFaceDown ? -nNorth_raw : nNorth_raw
+            let nEast  = isFaceDown ? -nEast_raw  : nEast_raw
+            
+            var dipDirDeg = atan2(nEast, nNorth) * 180.0 / .pi
             if dipDirDeg < 0 { dipDirDeg += 360.0 }
-            if dipDirDeg >= 360 { dipDirDeg -= 360.0 }
+            if dipDirDeg >= 360.0 { dipDirDeg -= 360.0 }
             
             var strikeDeg = dipDirDeg - 90.0
             if strikeDeg < 0 { strikeDeg += 360.0 }
             
-            let yUp = r.m32
-            let xUp = r.m31
+            // =========================================================================
+            // Asse longitudinale del telefono (Y_dev) per Trend e Plunge (Linea di immersione)
+            // 2ª RIGA della matrice: r.m21, -r.m22, r.m23
+            // =========================================================================
+            let vNorth = r.m21
+            let vEast  = -r.m22
+            let vUp    = r.m23
             
-            var rakeRad = atan2(yUp, -xUp)
-            var rakeDeg = rakeRad * 180.0 / .pi
+            let isPlungeDown = vUp <= 0
+            let tNorth = isPlungeDown ? vNorth : -vNorth
+            let tEast  = isPlungeDown ? vEast  : -vEast
+            
+            var trendDeg = atan2(tEast, tNorth) * 180.0 / .pi
+            if trendDeg < 0 { trendDeg += 360.0 }
+            if trendDeg >= 360.0 { trendDeg -= 360.0 }
+            
+            let plungeDeg = asin(min(max(abs(vUp), 0.0), 1.0)) * 180.0 / .pi
+            
+            // Rake - usa la gravità come in DirectSensors
+            let g = motion.gravity
+            let normG = sqrt(g.x * g.x + g.y * g.y + g.z * g.z)
+
+            guard normG > 0 else {
+                return (0, 0, 0, 0, Int(round(trendDeg)), Int(round(plungeDeg)))  // ← Exit
+            }
+
+            var rakeDeg = 0.0
+            let yUp = g.y / normG
+            let xUp = g.x / normG
+
+            let rakeRad = atan2(yUp, -xUp)
+            rakeDeg = rakeRad * 180.0 / .pi
             if rakeDeg < 0 { rakeDeg += 360.0 }
             if rakeDeg >= 360 { rakeDeg -= 360.0 }
-            
+
             if motion.gravity.z < 0 { rakeDeg = 180.0 - rakeDeg }
             if motion.gravity.y > 0 { rakeDeg = 180.0 - rakeDeg }
             if rakeDeg < 0 { rakeDeg += 360.0 }
 
-            let yEast = r.m12
-            let yNorth = r.m22
+            if rakeDeg > 180.0 {
+                rakeDeg = 360.0 - rakeDeg
+            }
+      
+            rakeDeg = 180.0 - rakeDeg
             
-            var teE = yEast, teN = yNorth, teU = yUp
-            if teU > 0 { teE = -teE; teN = -teN; teU = -teU }
-
-            var trendDeg = atan2(teE, teN) * 180.0 / .pi - magneticDeclination
-            if trendDeg < 0 { trendDeg += 360.0 }
-            if trendDeg >= 360 { trendDeg -= 360.0 }
-
-            let plungeDeg = asin(min(max(-teU, 0.0), 1.0)) * 180.0 / .pi
-
+             
+            
+            
+            // Gestione piano orizzontale (Dip < 1°)
             if dipDeg < 1.0 {
                 return (0, 0, 0, 0, Int(round(trendDeg)), Int(round(plungeDeg)))
             }
-
+            
             return (
                 Int(round(strikeDeg)),
                 Int(round(dipDirDeg)),

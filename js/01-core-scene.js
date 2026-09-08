@@ -1,3 +1,6 @@
+
+
+
 function toggleDigitizePanel(e) {
     if (e) e.stopPropagation();
     const ui = document.getElementById('ui');
@@ -32,7 +35,7 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x222222);
 
 const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 2000);
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
 renderer.outputEncoding = THREE.sRGBEncoding;
@@ -129,8 +132,14 @@ function onDeclinationToggleOrChange() {
 }
 
 function estimateDeclination(lat, lon) {
-    const magLat = 86.5 * Math.PI / 180;
-    const magLon = 164.0 * Math.PI / 180;
+    // Se la cache online è pronta usa quella, altrimenti calcola subito la formula reale
+    if (typeof window.estimateDeclinationUpdated === 'function') {
+        return window.estimateDeclinationUpdated(lat, lon);
+    }
+    
+    // Calcolo matematico diretto (WMM2025) invece di fare return 0
+    const magLat = 86.3 * Math.PI / 180;
+    const magLon = 133.0 * Math.PI / 180;
     const phi = lat * Math.PI / 180;
     const lambda = lon * Math.PI / 180;
     
@@ -152,36 +161,7 @@ function initGPSDeclination() {
 }
 
 // NATIVE GPS RECEIPT FROM SWIFT (iOS)
-window.handleNativeLocation = function(lat, lng, alt) {
-    // 1. Save global coordinates
-    window.currentLatitude = lat;
-    window.currentLongitude = lng;
-    window.currentAltitude = alt;
 
-    // 2. Calculate magnetic declination in background
-    const inputDecl = document.getElementById('input-declination');
-    const chkDecl = document.getElementById('chk-use-declination');
-
-    if (typeof estimateDeclination === 'function') {
-        const defaultDecl = estimateDeclination(lat, lng);
-
-        if (inputDecl) inputDecl.value = defaultDecl;
-        if (chkDecl) chkDecl.checked = true;
-
-        if (typeof onDeclinationToggleOrChange === 'function') {
-            onDeclinationToggleOrChange();
-        }
-    }
-
-    // 3. Update coordinate input fields
-    const latInput = document.getElementById('input-lat');
-    const lngInput = document.getElementById('input-lng');
-    const altInput = document.getElementById('input-alt');
-
-    if (latInput) latInput.value = lat.toFixed(6);
-    if (lngInput) lngInput.value = lng.toFixed(6);
-    if (altInput) altInput.value = alt.toFixed(1);
-};
 
 function autoInitSensors() {
     if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
@@ -192,7 +172,7 @@ function autoInitSensors() {
 }
 
 function initSensors() {
-    window.addEventListener('deviceorientation', handleOrientation, true);
+  
     sensorsActive = true;
     const dot = document.getElementById('sensor-dot');
     if (dot) dot.style.background = '#55ff55';
@@ -205,48 +185,6 @@ window.addEventListener('load', () => {
 document.addEventListener('touchstart', autoInitSensors, { once: true });
 document.addEventListener('pointerdown', autoInitSensors, { once: true });
 
-function handleOrientation(e) {
-    if (e.beta === null || e.gamma === null) return;
-    let heading = (e.webkitCompassHeading !== undefined && e.webkitCompassHeading !== null) ? e.webkitCompassHeading : (e.alpha !== null ? (360 - e.alpha) % 360 : 0);
-    const degToRad = Math.PI / 180.0;
-    const b = e.beta * degToRad, g = e.gamma * degToRad, h = heading * degToRad;
-
-    let Nx_dev = Math.sin(g), Ny_dev = -Math.sin(b) * Math.cos(g), Nz_dev = Math.cos(b) * Math.cos(g);
-    let Ne = Nx_dev * Math.cos(h) + Ny_dev * Math.sin(h);
-    let Nn = -Nx_dev * Math.sin(h) + Ny_dev * Math.cos(h);
-    let Nu = Nz_dev;
-
-    if (Nu < 0) { Ne = -Ne; Nn = -Nn; Nu = -Nu; }
-
-    let dip = Math.round(Math.acos(Math.min(1.0, Math.max(-1.0, Nu))) / degToRad);
-    let dipDir = 0, strike = 0;
-    if (dip > 0.5) {
-        dipDir = Math.round(((Math.atan2(-Ne, -Nn) / degToRad) + 360) % 360);
-        strike = Math.round((dipDir - 90 + 360) % 360);
-    }
-
-    rawSensorData.strike = strike;
-    rawSensorData.dipDir = dipDir;
-    rawSensorData.dip = dip;
-    rawSensorData.rake = 90;
-
-    const corrected = getCorrectedOrientation(strike, dipDir);
-    liveSensorData.strike = corrected.strike;
-    liveSensorData.dipDir = corrected.dipDir;
-    liveSensorData.dip = dip;
-    liveSensorData.rake = 90;
-
-    document.getElementById('sensor-strike').textContent = corrected.strike + '°';
-    document.getElementById('sensor-dipdir').textContent = corrected.dipDir + '°';
-    document.getElementById('sensor-dip').textContent = dip + '°';
-    if (document.getElementById('sensor-rake'))
-        document.getElementById('sensor-rake').textContent = '90°';
-
-    if (document.getElementById('input-strike')) document.getElementById('input-strike').value = corrected.strike;
-    if (document.getElementById('input-dipdir')) document.getElementById('input-dipdir').value = corrected.dipDir;
-    if (document.getElementById('input-dip')) document.getElementById('input-dip').value = dip;
-    if (document.getElementById('input-rake')) document.getElementById('input-rake').value = 90;
-}
 
 function updateMouseCoords(e) {
     mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
@@ -285,7 +223,8 @@ window.copySensorsToFields = function() {
 };
 
 // Native Callback from Swift
-window.handleNativeSensors = function(strike, dipDir, dip, rake, trend, plunge) {
+window.handleNativeSensors = function(strike, dipDir, dip, rake, trend, plunge, isFaceDown) {
+    
     const rStrike = strike || 0;
     const rDipDir = dipDir || 0;
     const rDip = dip || 0;
@@ -295,17 +234,28 @@ window.handleNativeSensors = function(strike, dipDir, dip, rake, trend, plunge) 
 
     const corrected = window.getCorrectedOrientation(rStrike, rDipDir);
 
+    // 1. Variabili di lavoro inizializzate con l'orientamento corretto
+    let finalStrike = corrected.strike;
+    let finalDipDir = corrected.dipDir;
+
+       
+        
+    
+    // 3. Registrazione nello stato globale (usa finalStrike e finalDipDir)
     window.rawSensorData = { strike: rStrike, dipDir: rDipDir, dip: rDip, rake: rRake, trend: rTrend, plunge: rPlunge };
     window.liveSensorData = {
-        strike: corrected.strike,
-        dipDir: corrected.dipDir,
+        strike: finalStrike,
+        dipDir: finalDipDir,
         dip: rDip,
         rake: rRake,
         trend: rTrend,
         plunge: rPlunge
+ 
     };
 
-    // Update panel text labels
+   
+    
+    // Update panel text labels (legge i valori aggiornati da liveSensorData)
     const setTxt = (id, val) => {
         const el = document.getElementById(id);
         if (el) el.textContent = val + '°';
@@ -326,7 +276,6 @@ window.handleNativeSensors = function(strike, dipDir, dip, rake, trend, plunge) 
         window.copySensorsToFields();
     }
 };
-
 window.currentCRS = localStorage.getItem('field3d_crs') || 'urn:ogc:def:crs:OGC:1.3:EPSG:3857';
 
 window.onCRSChanged = function() {
@@ -615,7 +564,7 @@ window.updateSceneBackground = updateSceneBackground;
 // NATIVE GPS RECEIPT FROM SWIFT (iOS)
 // ==========================================
 window.handleNativeLocation = function(lat, lng, alt) {
-    console.log("📍 GPS coordinates received from iOS:", lat, lng, alt);
+    console.log("📍 GNSS coordinates received from iOS:", lat, lng, alt);
 
     // 1. Update global variables
     window.currentLatitude = lat;
@@ -673,8 +622,97 @@ window.handleNativeLocation = function(lat, lng, alt) {
             userMarker.position.copy(ptThree);
             userMarker.visible = true;
         } catch (e) {
-            console.warn("Error updating GPS marker:", e);
+            console.warn("Error updating GNSS marker:", e);
         }
+    }
+};
+// 🔥 Carica declinazione on-demand quando premi il pulsante
+// 🔥 Carica declinazione da coordinate manuali o GPS
+window.loadDeclinationFromLocation = function() {
+    const latInput = document.getElementById('input-lat');
+    const lngInput = document.getElementById('input-lng');
+
+    // 1. Tenta di leggere da GPS nativo o da caselle di testo
+    let lat = (window.currentLatitude !== undefined && window.currentLatitude !== null)
+        ? window.currentLatitude
+        : parseFloat(latInput?.value?.replace(',', '.'));
+
+    let lng = (window.currentLongitude !== undefined && window.currentLongitude !== null)
+        ? window.currentLongitude
+        : parseFloat(lngInput?.value?.replace(',', '.'));
+
+    // 2. Se i campi sono vuoti, assegna valori predefiniti ed eviti l'alert
+    if (isNaN(lat) || isNaN(lng)) {
+        lat = 41.9028; // Coordinate predefinite
+        lng = 12.4964;
+        
+        if (latInput) latInput.value = lat;
+        if (lngInput) lngInput.value = lng;
+    }
+
+    // 3. Calcola e scrive la declinazione
+    const declVal = estimateDeclination(lat, lng);
+
+    const inputDecl = document.getElementById('input-declination');
+    const chkDecl = document.getElementById('chk-use-declination');
+
+    if (inputDecl) inputDecl.value = declVal;
+    if (chkDecl) chkDecl.checked = true;
+
+    if (typeof onDeclinationToggleOrChange === 'function') {
+        onDeclinationToggleOrChange();
+    }
+};
+
+document.addEventListener('DOMContentLoaded', function() {
+    const btn = document.getElementById('btn-load-declination');
+    if (btn) {
+        btn.onclick = function(e) {
+            if (typeof window.loadDeclinationFromLocation === 'function') {
+                window.loadDeclinationFromLocation(e);
+            }
+        };
+    }
+});
+
+// Funzione per cambiare scheda
+// Funzione per toggle indipendente dei due pannelli
+function toggleTopRightSection(event, tabId) {
+    const btn = event.currentTarget;
+    const contentDiv = document.getElementById(tabId);
+    
+    // Leggi lo stato attuale dal pulsante
+    const currentState = btn.getAttribute('data-state');
+    
+    if (currentState === 'off') {
+        // ACCENDI: da OFF a ON
+        btn.setAttribute('data-state', 'on');
+        btn.classList.add('active');
+        contentDiv.classList.add('visible');
+    } else {
+        // SPEGNI: da ON a OFF
+        btn.setAttribute('data-state', 'off');
+        btn.classList.remove('active');
+        contentDiv.classList.remove('visible');
+    }
+}
+
+// Gestione Attivazione/Disattivazione FPS Counter
+// ====== FPS SELECTOR (10, 20, 40, 60) ======
+window.fpsOptions = [10, 20, 40, 60];
+window.currentFpsIndex = 1; // Inizia a 20 (indice 1)
+window.currentFPS = window.fpsOptions[window.currentFpsIndex];
+
+window.toggleFPSValue = function() {
+    // Passa al prossimo valore (ciclicamente)
+    window.currentFpsIndex = (window.currentFpsIndex + 1) % window.fpsOptions.length;
+    window.currentFPS = window.fpsOptions[window.currentFpsIndex];
+    
+    // Aggiorna il pulsante
+    const btn = document.getElementById('btn-toggle-fps');
+    if (btn) {
+        btn.innerText = `⏱️ FPS: ${window.currentFPS}`;
+        btn.classList.toggle('pressed');
     }
 };
 

@@ -17,7 +17,8 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
         <title>3D Standalone Digitizer</title>
         <link rel="stylesheet" href="styles.css">
-            
+            <script src="zip.min.js"></script>
+        
         <script src="three.min.js"></script>
         <script src="OrbitControls.js"></script>
         <script src="DRACOLoader.js"></script>
@@ -31,6 +32,7 @@
             import { TilesRenderer } from 'https://cdn.jsdelivr.net/npm/3d-tiles-renderer@0.3.30/+esm';
             window.TilesRenderer = TilesRenderer;
         </script>
+ 
         <script src="proj4.js"></script>
     </head>
         
@@ -68,6 +70,7 @@
             </div>
             <div id="stereonet-controls">
                 <!-- Dynamic filters and controls -->
+                
             </div>
         </div>
     </div>
@@ -315,67 +318,108 @@
         <div id="top-right-container">
             <div class="top-right-header">
                 <div class="drag-handle" title="Drag panel">⋮⋮</div>
-                <button id="btn-toggle-right-panel" class="icon-btn" onclick="toggleRightPanel(event)" title="Minimize / Expand">➖</button>
+                
+                <!-- TOGGLE BUTTONS -->
+                <div class="top-right-tabs">
+                    <button class="top-tab-btn" data-state="off" onclick="toggleTopRightSection(event, 'tab-geo')">📐</button>
+                    <button class="top-tab-btn" data-state="off" onclick="toggleTopRightSection(event, 'tab-perf')">🖥️</button>
+                </div>
+               
             </div>
-
             <div id="top-right-content">
-                <!-- 3D POLYLINE METRICS PANEL -->
-                <div id="polyline-metrics-ui" style="display: none;">
-                    <div class="info">Active nodes: <strong id="node-count">0</strong></div>
-                    <div class="info">Collinear (&lambda;<sub>max</sub>/&lambda;<sub>med</sub>): <strong id="collinear-val" class="metric-highlight">-</strong></div>
-                    <div class="info">Coplanar (1/&lambda;<sub>min</sub>): <strong id="coplanar-val" class="metric-highlight">-</strong></div>
+                <!-- TAB 1: GEOLOGIA (Strike, Dip, Autovalori, Sensori, Declinazione) -->
+                <div id="tab-geo" class="top-tab-content">
+                    <!-- 3D POLYLINE METRICS PANEL (Autovalori / Collinear-Coplanar) -->
+                    <div id="polyline-metrics-ui" style="display: none;">
+                        <div class="info">Active nodes: <strong id="node-count">0</strong></div>
+                        <div class="info">Collinear (&lambda;<sub>max</sub>/&lambda;<sub>med</sub>): <strong id="collinear-val" class="metric-highlight">-</strong></div>
+                        <div class="info">Coplanar (1/&lambda;<sub>min</sub>): <strong id="coplanar-val" class="metric-highlight">-</strong></div>
+                    </div>
+                    <!-- SENSOR PANEL & DECLINAZIONE -->
+                    <div id="sensor-ui">
+                        <div style="display:flex; justify-content:flex-end; margin-bottom:2px;">
+                            <span id="sensor-dot" style="width:7px; height:7px; border-radius:50%; background:#888;"></span>
+                        </div>
+                        <div id="sensor-data-box">
+                            <div><strong>Str:</strong> <span id="sensor-strike">0°</span></div>
+                            <div><strong>DipDir:</strong> <span id="sensor-dipdir">0°</span></div>
+                            <div><strong>Dip:</strong> <span id="sensor-dip">0°</span></div>
+                            <div><strong>Rake:</strong> <span id="sensor-rake">90°</span></div>
+                            <div><strong>Trend:</strong> <span id="sensor-trend">0°</span></div>
+                            <div><strong>Plunge:</strong> <span id="sensor-plunge">0°</span></div>
+                        </div>
+                        <div style="margin-top: 6px; border-top: 1px solid #444; padding-top: 4px;">
+                            <div class="field-group sensor-checkbox-group">
+                                <input type="checkbox" id="chk-live-sync" style="width: auto; accent-color:#1D9E75;" checked>
+                                <label for="chk-live-sync">Live Sync</label>
+                            </div>
+                            <button id="btn-copy-to-fields" onclick="copySensorsToFields()" style="margin-top:4px; font-size: 9px; padding: 4px 2px;">📋 Copy</button>
+                        </div>
+                        <div style="margin-top: 6px; border-top: 1px solid #444; padding-top: 4px;">
+                            <div class="field-group sensor-checkbox-group">
+                                <input type="checkbox" id="chk-use-declination" style="width: auto; accent-color:#1D9E75;" onchange="onDeclinationToggleOrChange()" checked>
+                                <label for="chk-use-declination">Apply Declination</label>
+                            </div>
+                            <div class="field-group" style="grid-template-columns: 35px 1fr; margin-top: 4px;">
+                                <button id="btn-load-declination" style="background: #2a2a2a; border: 1px solid #444; color: #fff; padding: 2px 16px; height: 28px; cursor: pointer; border-radius: 3px; box-sizing: border-box; vertical-align: middle;">Decl°</button>
+                                <input type="number" id="input-declination" value="0" step="0.1" placeholder="0" oninput="onDeclinationToggleOrChange()" style="width: 50px; height: 28px; box-sizing: border-box; vertical-align: middle;">
+                            </div>
+                            <div id="declination-status" style="font-size: 8px; color: #888; margin-top: 2px; word-break: break-all;">
+                                Detecting GNSS position...
+                            </div>
+                        </div>
+                    </div>
                 </div>
-
-                <!-- SENSOR PANEL -->
-                <div id="sensor-ui">
-                    <div style="display:flex; justify-content:flex-end; margin-bottom:2px;">
-                        <span id="sensor-dot" style="width:7px; height:7px; border-radius:50%; background:#888;"></span>
-                    </div>
-
-                    <div id="sensor-data-box">
-                        <div><strong>Str:</strong> <span id="sensor-strike">0°</span></div>
-                        <div><strong>DipDir:</strong> <span id="sensor-dipdir">0°</span></div>
-                        <div><strong>Dip:</strong> <span id="sensor-dip">0°</span></div>
-                        <div><strong>Rake:</strong> <span id="sensor-rake">90°</span></div>
-                        <div><strong>Trend:</strong> <span id="sensor-trend">0°</span></div>
-                        <div><strong>Plunge:</strong> <span id="sensor-plunge">0°</span></div>
-                    </div>
-
-                    <div style="margin-top: 6px; border-top: 1px solid #444; padding-top: 4px;">
-                        <div class="field-group sensor-checkbox-group">
-                            <input type="checkbox" id="chk-live-sync" style="width: auto; accent-color:#1D9E75;" checked>
-                            <label for="chk-live-sync">Live Sync</label>
+                <!-- TAB 2: PERFORMANCE (VRAM & FPS) -->
+                <div id="tab-perf" class="top-tab-content">
+                    <!-- PERFORMANCE CONTROLS -->
+                    <div id="perf-controls-ui">
+                        <!-- VRAM VALUES -->
+                        <div style="font-size: 9px; background: rgba(255,255,255,0.05); padding: 4px 6px; border-radius: 4px; margin-bottom: 6px;">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+                                <span style="color: #aaa;">Geom:</span>
+                                <span id="stat-geometries" style="color: #00e1ff; font-weight: bold;">0.0 MB</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between;">
+                                <span style="color: #aaa;">Tex:</span>
+                                <span id="stat-textures" style="color: #ffb700; font-weight: bold;">0.0 MB</span>
+                            </div>
                         </div>
-                        <button id="btn-copy-to-fields" onclick="copySensorsToFields()" style="margin-top:4px; font-size: 9px; padding: 4px 2px;">📋 Copy</button>
-                    </div>
 
-                    <div style="margin-top: 6px; border-top: 1px solid #444; padding-top: 4px;">
-                        <div class="field-group sensor-checkbox-group">
-                            <input type="checkbox" id="chk-use-declination" style="width: auto; accent-color:#1D9E75;" onchange="onDeclinationToggleOrChange()" checked>
-                            <label for="chk-use-declination">Apply Declination</label>
+                        <!-- FPS TOGGLE -->
+                        <div style="margin-bottom: 6px;">
+                            <button id="btn-toggle-fps" class="mini-btn" onclick="window.toggleFPSValue()" style="width: 100%;">
+                                ⏱️ FPS: 20
+                            </button>
                         </div>
-                        <div class="field-group" style="grid-template-columns: 35px 1fr; margin-top: 4px;">
-                            <label for="input-declination">decl°</label>
-                            <input type="number" id="input-declination" value="0" step="0.1" placeholder="0" oninput="onDeclinationToggleOrChange()">
-                        </div>
-                        <div id="declination-status" style="font-size: 8px; color: #888; margin-top: 2px; word-break: break-all;">
-                            Detecting GPS position...
+
+                        <!-- QUALITY PRESETS -->
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
+                            <button type="button" onclick="setPerformancePreset('low')" class="vram-btn-compact">Low</button>
+                            <button type="button" onclick="setPerformancePreset('mid')" class="vram-btn-compact">Mid</button>
+                            <button type="button" onclick="setPerformancePreset('high')" class="vram-btn-compact">High</button>
+                            <button type="button" onclick="setPerformancePreset('ultra')" class="vram-btn-compact">Ultra</button>
                         </div>
                     </div>
                 </div>
+                
             </div>
         </div>
 
         <!-- BOTTOM LEFT CONTROLS -->
         <div id="bottom-left-controls">
             <button id="btn-recenter" class="mini-btn" onclick="recenterScene()" title="Recenter scene to original view">🎯 Recenter</button>
-            <button id="btn-set-center" class="mini-btn" onclick="toggleSetCenter()" title="Select a point on the model as new rotation center">📍 Set Center</button>
+           
             <button id="btn-toggle-clip" class="mini-btn" onclick="toggleClipPopup()" title="Camera Clipping Planes">📷 Clip</button>
             <button id="btn-lasso" class="mini-btn" onclick="toggleLassoMode()" title="Draw a lasso to select features and plot on stereonet">🔵 Lasso</button>
             <button id="btn-rotate-model" class="mini-btn" onclick="toggleRotateMenu()" title="Rotate Model">🔄 Rotate</button>
             <button id="btn-toggle-theme" class="mini-btn" onclick="toggleTheme()" title="Toggle Light/Dark Theme">🌓 Theme</button>
-            <button id="btn-gps-toggle" class="mini-btn" onclick="toggleGPS()" title="Show/Hide Location marker">📍 GNSS Inactive (Location)</button>
+            <button id="btn-gps-toggle" class="mini-btn" onclick="toggleGPS()" title="Show/Hide Location marker">📍 Show Me</button>
             <button id="btn-goto-location" class="mini-btn" onclick="centerOnLocation()" title="Center camera on your location">🎯 Go to Location</button>
+            
+            <button id="btn-calibration" onclick="startCalibration()" title="Calibration (5 points)" style="display: none;">
+                📍 Calibration
+            </button>
         </div>
 
         <!-- CLIPPING PLANES POPUP -->
@@ -413,6 +457,43 @@
         <div id="canvas-container"></div>
     </div>
     
+    
+    <!-- ======================================================== -->
+            <!-- SLIDER OFFSET ALTITUDINE (POSIZIONATO A DESTRA)          -->
+            <!-- ======================================================== -->
+            <div id="alt-slider-panel" class="alt-slider-panel" style="display: none;">
+              <span class="alt-label-title">Offset Z</span>
+              
+              <div class="slider-wrapper">
+                <span class="alt-limit">+100m</span>
+                <input
+                  type="range"
+                  id="input-alt-slider"
+                  min="-100"
+                  max="100"
+                  step="0.5"
+                  value="0"
+                  orient="vertical"
+                  oninput="window.updateGpsAltitudeOffset(this.value)"
+                />
+                <span class="alt-limit">-100m</span>
+              </div>
+
+              <span id="alt-offset-val" class="alt-value-display">0.0m</span>
+              
+              <button type="button" class="btn-alt-reset" onclick="document.getElementById('input-alt-slider').value=0; window.updateGpsAltitudeOffset(0);" title="Resetta a 0m">
+                ↺
+              </button>
+              <!-- PULSANTE RAYCASTING AUTOMATICO -->
+                  <button type="button" class="btn-alt-reset" onclick="window.snapToTerrain()" title="Snap automatico alla superficie 3D" style="font-size: 10px;">
+                    🎯
+                  </button>
+            </div>
+            <!-- ======================================================== -->
+
+        </div><!-- fine #app-wrapper -->
+        
+        
     <!-- ROTATION MENU POPUP -->
     <div id="rotate-model-menu"
          onpointerdown="event.stopPropagation()"
@@ -460,6 +541,7 @@
     </div>
     
     <!-- APPLICATION SCRIPTS -->
+    <script src="js/magneticPoleCache.js"></script>
     <script src="js/01-core-scene.js"></script>
     <script src="js/02-scene-interaction.js"></script>
     <script src="js/03-model-loading.js"></script>
@@ -471,6 +553,8 @@
     <script src="js/09-notes.js"></script>
     <script src="js/10-lidar.js"></script>
     <script src="js/11-imhere.js"></script>
-    
+    <script src="js/12-3tz-setting.js"></script>
+    <!-- Dopo gli altri script (dopo 08-lasso-stereonet.js) -->
+    <script src="js/13-calibration.js"></script>
     </body>
 </html>
