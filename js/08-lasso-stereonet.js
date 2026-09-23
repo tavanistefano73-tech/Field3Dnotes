@@ -190,6 +190,9 @@ function selectFeaturesInLasso(lassoPoints) {
     
     digitizedFeatures.forEach(f => {
         if (!f.group) return;
+
+        // FILTRO DI DEFAULT: Ignora simple polyline e draped polygon
+        if (f.is_simple_polyline || f.is_draped_polygon) return;
         
         const worldPos = new THREE.Vector3();
         const box = new THREE.Box3().setFromObject(f.group);
@@ -613,7 +616,7 @@ function drawStereonet() {
 
     const showContours = document.getElementById('stereo-show-contours')?.checked;
 
-    // ================= 1.  CONTOURING (POLIGONI COLORATI) =================
+    // ================= 1. CONTOURING (POLIGONI COLORATI) =================
     if (showContours) {
         const lineations = getVisibleLineations();
 
@@ -658,7 +661,6 @@ function drawStereonet() {
 
                 ctx.restore();
                 
-                
                 drawColorbar(ctx, minDensity, maxDensity, levels, size, R, cy);
             }
         } else {
@@ -685,7 +687,6 @@ function drawStereonet() {
     // ================= 3. DISEGNO FEATURE (SOLO SE CONTOURS È DISATTIVATO) =================
     let projectedCount = 0;
 
-    // MODIFICA 1: Se il contouring è ATTIVO, non disegniamo poli/linee/strie
     if (!showContours) {
         const showPoles = document.getElementById('stereo-show-poles')?.checked;
         const showGC = document.getElementById('stereo-show-gc')?.checked;
@@ -752,6 +753,10 @@ function drawStereonet() {
                     strike = pca.strike; dipDir = pca.dipDir; dip = pca.dip;
                 } else return;
 
+                // TAMPONE DENSITÀ / DIP 90°:
+                // Previene le singolarità matematiche di tan(90°) per tutti i piani (piani, plane&line, PCA polilinee)
+                if (dip >= 90) dip = 89.999;
+
                 const dipRad = (dip * Math.PI) / 180;
                 const poleTrendRad = ((dipDir + 180) % 360) * Math.PI / 180;
                 const polePlungeRad = (90 - dip) * Math.PI / 180;
@@ -774,6 +779,7 @@ function drawStereonet() {
                     ctx.strokeStyle = color;
                     ctx.lineWidth = 1.5;
                     ctx.beginPath();
+                      
                     const strikeRad = (strike * Math.PI) / 180;
                     let started = false;
                     for (let a = -90; a <= 90; a += 2) {
@@ -857,87 +863,89 @@ function drawStereonet() {
     }
     
     // ================= 4. DISEGNO BETA AXIS (PCA) E SCRITTA TITOLO =================
-        const showBetaAxis = document.getElementById('stereo-show-beta-axis')?.checked;
-        const titleHeader = document.querySelector('.stereo-section-title') || document.getElementById('stereo-title');
+    const showBetaAxis = document.getElementById('stereo-show-beta-axis')?.checked;
+    const titleHeader = document.querySelector('.stereo-section-title') || document.getElementById('stereo-title');
 
-        if (showBetaAxis) {
-            const pcaResult = calculateBetaAxisPCA();
+    if (showBetaAxis) {
+        const pcaResult = calculateBetaAxisPCA();
 
-            if (pcaResult) {
-                const { eMax, eInt, eMin } = pcaResult;
+        if (pcaResult) {
+            const { eMax, eInt, eMin } = pcaResult;
 
-                // Formattazione sintetica per il titolo
-                const fmt = (tp) => `${String(tp.trend).padStart(3, '0')}/${String(tp.plunge).padStart(2, '0')}`;
-                if (titleHeader) {
-                    titleHeader.textContent = `Stereonet | V1:${fmt(eMax)} V2:${fmt(eInt)} β:${fmt(eMin)}`;
-                }
+            // Formattazione sintetica per il titolo
+            const fmt = (tp) => `${String(tp.trend).padStart(3, '0')}/${String(tp.plunge).padStart(2, '0')}`;
+            if (titleHeader) {
+                titleHeader.textContent = `Stereonet | V1:${fmt(eMax)} V2:${fmt(eInt)} β:${fmt(eMin)}`;
+            }
 
-                const projectToCanvas = (trend, plunge) => {
-                    const trendRad = (trend * Math.PI) / 180;
-                    const plungeRad = (plunge * Math.PI) / 180;
-                    const r = R * Math.SQRT2 * Math.sin((Math.PI / 4) - (plungeRad / 2));
-                    return {
-                        x: cx + r * Math.sin(trendRad),
-                        y: cy - r * Math.cos(trendRad)
-                    };
+            const projectToCanvas = (trend, plunge) => {
+                const trendRad = (trend * Math.PI) / 180;
+                const plungeRad = (plunge * Math.PI) / 180;
+                const r = R * Math.SQRT2 * Math.sin((Math.PI / 4) - (plungeRad / 2));
+                return {
+                    x: cx + r * Math.sin(trendRad),
+                    y: cy - r * Math.cos(trendRad)
                 };
+            };
 
-                // 1. Piano Pi Perpendicolare ad eMin (Beta Axis)
-                const piDip = 90 - eMin.plunge;
-                const piStrike = (eMin.trend + 90) % 360;
+            // 1. Piano Pi Perpendicolare ad eMin (Beta Axis)
+            let piDip = 90 - eMin.plunge;
+            if (piDip >= 90) piDip = 89.999; // Tampone anche per il piano Pi se verticale
+            
+            const piStrike = (eMin.trend + 90) % 360;
 
-                if (piDip > 0) {
-                    const dipRad = (piDip * Math.PI) / 180;
-                    const strikeRad = (piStrike * Math.PI) / 180;
+            if (piDip > 0) {
+                const dipRad = (piDip * Math.PI) / 180;
+                const strikeRad = (piStrike * Math.PI) / 180;
 
-                    ctx.strokeStyle = '#000000';
-                    ctx.lineWidth = 2.25;
-                    ctx.setLineDash([6, 3]);
-                    ctx.beginPath();
-                    let started = false;
-                    for (let a = -90; a <= 90; a += 2) {
-                        const aRad = (a * Math.PI) / 180;
-                        const appDip = Math.atan(Math.tan(dipRad) * Math.cos(aRad));
-                        const rGC = R * Math.SQRT2 * Math.sin((Math.PI / 4) - (appDip / 2));
-                        const angle = strikeRad + aRad + Math.PI / 2;
-                        const gx = cx + rGC * Math.sin(angle);
-                        const gy = cy - rGC * Math.cos(angle);
-                        if (!started) { ctx.moveTo(gx, gy); started = true; }
-                        else { ctx.lineTo(gx, gy); }
-                    }
-                    ctx.stroke();
-                    ctx.setLineDash([]);
-                }
-
-                // 2. V1 (Max) - Verde
-                const pMax = projectToCanvas(eMax.trend, eMax.plunge);
-                ctx.fillStyle = '#00FF00';
-                ctx.beginPath(); ctx.arc(pMax.x, pMax.y, 4, 0, Math.PI * 2); ctx.fill();
-                ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.stroke();
-
-                // 3. V2 (Int) - Ciano
-                const pInt = projectToCanvas(eInt.trend, eInt.plunge);
-                ctx.fillStyle = '#00FFFF';
-                ctx.beginPath(); ctx.arc(pInt.x, pInt.y, 4, 0, Math.PI * 2); ctx.fill();
-                ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.stroke();
-
-                // 4. V3 / Beta Axis (Min) - Pallino Nero 180%
-                const pMin = projectToCanvas(eMin.trend, eMin.plunge);
-                ctx.fillStyle = '#000000';
+                ctx.strokeStyle = '#000000';
+                ctx.lineWidth = 2.25;
+                ctx.setLineDash([6, 3]);
                 ctx.beginPath();
-                ctx.arc(pMin.x, pMin.y, 7.2, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.strokeStyle = '#FFFFFF';
-                ctx.lineWidth = 1.5;
+                let started = false;
+                for (let a = -90; a <= 90; a += 2) {
+                    const aRad = (a * Math.PI) / 180;
+                    const appDip = Math.atan(Math.tan(dipRad) * Math.cos(aRad));
+                    const rGC = R * Math.SQRT2 * Math.sin((Math.PI / 4) - (appDip / 2));
+                    const angle = strikeRad + aRad + Math.PI / 2;
+                    const gx = cx + rGC * Math.sin(angle);
+                    const gy = cy - rGC * Math.cos(angle);
+                    if (!started) { ctx.moveTo(gx, gy); started = true; }
+                    else { ctx.lineTo(gx, gy); }
+                }
                 ctx.stroke();
+                ctx.setLineDash([]);
             }
-        } else {
-            // Ripristina titolo predefinito se l'opzione è disattivata
-            if (titleHeader && titleHeader.textContent.includes('V1:')) {
-                titleHeader.textContent = 'Stereonet';
-            }
+
+            // 2. V1 (Max) - Verde
+            const pMax = projectToCanvas(eMax.trend, eMax.plunge);
+            ctx.fillStyle = '#00FF00';
+            ctx.beginPath(); ctx.arc(pMax.x, pMax.y, 4, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.stroke();
+
+            // 3. V2 (Int) - Ciano
+            const pInt = projectToCanvas(eInt.trend, eInt.plunge);
+            ctx.fillStyle = '#00FFFF';
+            ctx.beginPath(); ctx.arc(pInt.x, pInt.y, 4, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.stroke();
+
+            // 4. V3 / Beta Axis (Min) - Pallino Nero 180%
+            const pMin = projectToCanvas(eMin.trend, eMin.plunge);
+            ctx.fillStyle = '#000000';
+            ctx.beginPath();
+            ctx.arc(pMin.x, pMin.y, 7.2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+        }
+    } else {
+        // Ripristina titolo predefinito se l'opzione è disattivata
+        if (titleHeader && titleHeader.textContent.includes('V1:')) {
+            titleHeader.textContent = 'Stereonet';
         }
     }
+}
 
 window.addEventListener('resize', () => {
     const win = document.getElementById('stereonet-window');
@@ -1567,4 +1575,163 @@ function calculateBetaAxisPCA() {
         eInt: vecToTrendPlunge(eig[1].vec),
         eMin: vecToTrendPlunge(eig[2].vec)
     };
+}
+async function exportStereonetPDF() {
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10);
+    const timeStr = now.toTimeString().slice(0, 5).replace(':', '');
+    const filename = `stereonet_${dateStr}_${timeStr}.pdf`;
+
+    updateStatus('Generating Vector Stereonet PDF...', '#e0a800');
+
+    try {
+        const { jsPDF } = window.jspdf || {};
+        if (!jsPDF) throw new Error("jsPDF library not loaded");
+
+        // 1. Creazione di un elemento SVG temporaneo in memoria
+        const size = 500; // Risoluzione vettoriale dello spazio di lavoro
+        const cx = size / 2;
+        const cy = size / 2;
+        const R = size * 0.42;
+
+        const svgNS = "http://www.w3.org/2000/svg";
+        const svg = document.createElementNS(svgNS, "svg");
+        svg.setAttribute("width", size);
+        svg.setAttribute("height", size);
+        svg.setAttribute("viewBox", `0 0 ${size} ${size}`);
+
+        // Sfondo bianco
+        const bg = document.createElementNS(svgNS, "rect");
+        bg.setAttribute("width", "100%");
+        bg.setAttribute("height", "100%");
+        bg.setAttribute("fill", "#ffffff");
+        svg.appendChild(bg);
+
+        // 2. Disegno Primitiva (Cerchio esterno)
+        const outerCircle = document.createElementNS(svgNS, "circle");
+        outerCircle.setAttribute("cx", cx);
+        outerCircle.setAttribute("cy", cy);
+        outerCircle.setAttribute("r", R);
+        outerCircle.setAttribute("fill", "none");
+        outerCircle.setAttribute("stroke", "#000000");
+        outerCircle.setAttribute("stroke-width", "1.5");
+        svg.appendChild(outerCircle);
+
+        // Assi N-S e E-W
+        const axes = document.createElementNS(svgNS, "path");
+        axes.setAttribute("d", `M ${cx} ${cy - R} L ${cx} ${cy + R} M ${cx - R} ${cy} L ${cx + R} ${cy}`);
+        axes.setAttribute("stroke", "#cccccc");
+        axes.setAttribute("stroke-width", "0.8");
+        svg.appendChild(axes);
+
+        // Etichette dei punti cardinali
+        const labels = [
+            { text: 'N', x: cx, y: cy - R - 8 },
+            { text: 'S', x: cx, y: cy + R + 16 },
+            { text: 'E', x: cx + R + 12, y: cy + 5 },
+            { text: 'W', x: cx - R - 16, y: cy + 5 }
+        ];
+        labels.forEach(lbl => {
+            const txt = document.createElementNS(svgNS, "text");
+            txt.setAttribute("x", lbl.x);
+            txt.setAttribute("y", lbl.y);
+            txt.setAttribute("font-size", "14");
+            txt.setAttribute("font-family", "sans-serif");
+            txt.setAttribute("text-anchor", "middle");
+            txt.setAttribute("fill", "#000000");
+            txt.textContent = lbl.text;
+            svg.appendChild(txt);
+        });
+
+        // 3. Disegno dei Dati (Grandi Cerchi e Poli/Punti)
+        // Adatta queste chiavi alla tua struttura dati 'stereonetData'
+        const data = (typeof stereonetData !== 'undefined') ? stereonetData : { points: [], planes: [] };
+
+        // Disegno dei Piani (Grandi Cerchi)
+        if (data.planes && Array.isArray(data.planes)) {
+            data.planes.forEach(plane => {
+                // Se hai una funzione per calcolare i punti dell'arco del grande cerchio:
+                if (typeof getGreatCirclePath === 'function') {
+                    const dPath = getGreatCirclePath(plane.strike, plane.dip, cx, cy, R);
+                    const path = document.createElementNS(svgNS, "path");
+                    path.setAttribute("d", dPath);
+                    path.setAttribute("fill", "none");
+                    path.setAttribute("stroke", plane.color || "#0000ff");
+                    path.setAttribute("stroke-width", "1");
+                    svg.appendChild(path);
+                }
+            });
+        }
+
+        // Disegno dei Poli / Punti
+        const points = data.points || data.data || [];
+        points.forEach(pt => {
+            // Conversione Trend/Plunge in coordinate XY nel canvas
+            let coords = { x: pt.x, y: pt.y };
+            
+            // Se le coordinate non sono precalcolate, le calcoliamo da trend e plunge
+            if ((coords.x === undefined || coords.y === undefined) && pt.trend !== undefined && pt.plunge !== undefined) {
+                if (typeof trendPlungeToCoords === 'function') {
+                    coords = trendPlungeToCoords(pt.trend, pt.plunge, cx, cy, R);
+                }
+            } else {
+                // Mappatura coordinate relative al centro
+                coords.x = cx + (pt.x * R);
+                coords.y = cy - (pt.y * R);
+            }
+
+            if (coords && !isNaN(coords.x) && !isNaN(coords.y)) {
+                const circle = document.createElementNS(svgNS, "circle");
+                circle.setAttribute("cx", coords.x);
+                circle.setAttribute("cy", coords.y);
+                circle.setAttribute("r", pt.size || "3");
+                circle.setAttribute("fill", pt.color || "#ff0000");
+                circle.setAttribute("stroke", pt.strokeColor || "#000000");
+                circle.setAttribute("stroke-width", "0.5");
+                svg.appendChild(circle);
+            }
+        });
+
+        // 4. Conversione dell'SVG generato nel PDF Vettoriale
+        document.body.appendChild(svg); // Temporaneamente nel DOM per consentire il parsing
+        
+        const pdf = new jsPDF({
+            orientation: 'portrait',
+            unit: 'mm',
+            format: 'a4'
+        });
+
+        pdf.setFontSize(16);
+        pdf.text("Stereonet Export", 105, 15, { align: "center" });
+
+        // Conversione diretta SVG -> PDF Vettoriale
+        await pdf.svg(svg, {
+            x: 15,
+            y: 25,
+            width: 180,
+            height: 180
+        });
+
+        document.body.removeChild(svg); // Rimozione pulita
+
+        // 5. Salva o Invia all'App nativa
+        const pdfBlob = pdf.output('blob');
+        const pdfBase64 = pdf.output('datauristring');
+
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.exportGeoJSON) {
+            window.webkit.messageHandlers.exportGeoJSON.postMessage({
+                jsonString: pdfBase64,
+                filename: filename
+            });
+            updateStatus('Stereonet Vector PDF saved! 💾', '#28a745');
+        } else {
+            triggerDirectDownload(pdfBlob, filename);
+            updateStatus('Stereonet Vector PDF downloaded! 💾', '#28a745');
+        }
+
+    } catch (err) {
+        console.error("❌ Error exporting Stereonet Vector PDF:", err);
+        alert("Error exporting Stereonet Vector PDF: " + err.message);
+        updateStatus('Error generating PDF', '#dc3545');
+    }
 }

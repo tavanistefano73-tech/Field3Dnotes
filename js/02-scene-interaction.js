@@ -207,3 +207,186 @@ function applyModelRotation(degrees) {
 })();
 window.syncAndRotateModel = syncAndRotateModel;
 window.applyModelRotation = applyModelRotation;
+
+
+// ==================== DISTANCE MEASURE TOOL ====================
+let isMeasuring = false;
+let measurePoints = [];
+let measureMarkers = [];
+let measureLine = null;
+let measureLabelEl = null;
+
+// Tracciamento posizione iniziale per distinguere il Tap (misura) dal Drag (rotazione vista)
+let measureStartX = 0;
+let measureStartY = 0;
+
+window.addEventListener('pointerdown', (e) => {
+    measureStartX = e.clientX;
+    measureStartY = e.clientY;
+}, false);
+
+window.addEventListener('pointerup', handleMeasurePointerUp, false);
+
+function toggleMeasureTool(event) {
+    // Blocca la propagazione per non registrare il click sul pulsante come punto 3D
+    if (event) event.stopPropagation();
+
+    isMeasuring = !isMeasuring;
+    clearMeasurement();
+
+    const btn = document.getElementById('btn-measure');
+    if (btn) {
+        btn.classList.toggle('active', isMeasuring);
+    }
+
+    const statusMsg = isMeasuring
+        ? "Measure mode active: Tap the first point on the mesh..."
+        : "Measure tool deactivated";
+    if (typeof updateStatus === 'function') {
+        updateStatus(statusMsg, isMeasuring ? '#ffc107' : '#17a2b8');
+    }
+}
+
+function handleMeasurePointerUp(event) {
+    if (!isMeasuring || !loadedMesh) return;
+
+    // Ignora i tap su pulsanti o elementi della barra UI
+    if (event.target.closest('#bottom-bar') ||
+        event.target.closest('#top-bar') ||
+        event.target.closest('#bottom-left-controls') ||
+        event.target.closest('#top-right-container') ||
+        event.target.closest('#ui') ||
+        event.target.tagName === 'BUTTON' ||
+        event.target.tagName === 'SELECT' ||
+        event.target.tagName === 'INPUT' ||
+        event.target.tagName === 'LABEL') {
+        return;
+    }
+
+    // Se lo spostamento del dito/mouse è > 8px, è una rotazione/pan della telecamera, non un tap
+    const dist = Math.hypot(event.clientX - measureStartX, event.clientY - measureStartY);
+    if (dist > 8) return;
+
+    // Normalizzazione coordinate rispetto al canvas
+    const canvas = (window.renderer && window.renderer.domElement) ? window.renderer.domElement : null;
+    const rect = canvas ? canvas.getBoundingClientRect() : { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+
+    const mouse = new THREE.Vector2(
+        ((event.clientX - rect.left) / rect.width) * 2 - 1,
+        -((event.clientY - rect.top) / rect.height) * 2 + 1
+    );
+
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(mouse, camera);
+
+    const intersects = raycaster.intersectObject(loadedMesh, true);
+
+    if (intersects.length > 0) {
+        const hitPoint = intersects[0].point.clone();
+
+        if (measurePoints.length === 2) {
+            clearMeasurement();
+        }
+
+        measurePoints.push(hitPoint);
+        addMeasureMarker(hitPoint);
+
+        if (measurePoints.length === 1) {
+            if (typeof updateStatus === 'function') {
+                updateStatus("First point selected. Tap the second point...", '#ffc107');
+            }
+        } else if (measurePoints.length === 2) {
+            const p1 = measurePoints[0];
+            const p2 = measurePoints[1];
+            const distance = p1.distanceTo(p2);
+
+            drawMeasureLine(p1, p2);
+            displayMeasureResult(p1, p2, distance);
+
+            if (typeof updateStatus === 'function') {
+                updateStatus(`Measured distance: ${distance.toFixed(2)} m`, '#28a745');
+            }
+        }
+    }
+}
+
+function drawMeasureLine(p1, p2) {
+    if (measureLine) {
+        scene.remove(measureLine);
+        measureLine.geometry.dispose();
+    }
+
+    const geometry = new THREE.BufferGeometry().setFromPoints([p1, p2]);
+    const material = new THREE.LineBasicMaterial({
+        color: 0xff3333,
+        linewidth: 15,
+        depthTest: false
+    });
+
+    measureLine = new THREE.Line(geometry, material);
+    measureLine.renderOrder = 999;
+    scene.add(measureLine);
+}
+
+function addMeasureMarker(point) {
+    // Geometria con un singolo vertice
+    const geometry = new THREE.BufferGeometry().setFromPoints([point]);
+
+    // Materiale per punti con dimensione fissa in PIXEL
+    const material = new THREE.PointsMaterial({
+        color: 0xffff00,
+        size: 8,                    // Dimensione fissa in pixel sullo schermo
+        sizeAttenuation: false,     // Impedisce che il punto rimpicciolisca allontanandosi
+        depthTest: false
+    });
+
+    const marker = new THREE.Points(geometry, material);
+    marker.renderOrder = 1000;
+
+    scene.add(marker);
+    measureMarkers.push(marker);
+}
+
+function displayMeasureResult(p1, p2, distance) {
+    if (measureLabelEl) measureLabelEl.remove();
+
+    measureLabelEl = document.createElement('div');
+    measureLabelEl.className = 'measure-result-label';
+    measureLabelEl.style.position = 'absolute';
+    measureLabelEl.style.bottom = '50px';
+    measureLabelEl.style.right = '20px';
+    measureLabelEl.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
+    measureLabelEl.style.color = '#00ffcc';
+    measureLabelEl.style.padding = '8px 14px';
+    measureLabelEl.style.borderRadius = '6px';
+    measureLabelEl.style.fontFamily = 'inherit';
+    measureLabelEl.style.fontSize = '13px';
+    measureLabelEl.style.border = '1px solid #00ffcc';
+    measureLabelEl.style.zIndex = '10000';
+    measureLabelEl.innerHTML = `📏 Distance: <b>${distance.toFixed(2)} m</b>`;
+
+    document.body.appendChild(measureLabelEl);
+}
+
+function clearMeasurement() {
+    measurePoints = [];
+
+    measureMarkers.forEach(m => {
+        scene.remove(m);
+        m.geometry.dispose();
+        m.material.dispose();
+    });
+    measureMarkers = [];
+
+    if (measureLine) {
+        scene.remove(measureLine);
+        measureLine.geometry.dispose();
+        measureLine.material.dispose();
+        measureLine = null;
+    }
+
+    if (measureLabelEl) {
+        measureLabelEl.remove();
+        measureLabelEl = null;
+    }
+}

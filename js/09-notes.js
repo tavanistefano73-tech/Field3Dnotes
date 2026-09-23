@@ -317,13 +317,19 @@ function addNoteAtMouse(e) {
         let sketchLastX = 0, sketchLastY = 0;
 
 function openSketchOverlay() {
+    // ⬇️ Se siamo su iOS/WKWebView, apriamo PencilKit nativo
+    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.openPencilKit) {
+        window.webkit.messageHandlers.openPencilKit.postMessage({});
+        return;
+    }
+
+    // Fallback Canvas Web per browser/desktop
     sketchBgCanvas = document.getElementById('sketch-bg-canvas');
     sketchDrawCanvas = document.getElementById('sketch-draw-canvas');
     sketchBgCtx = sketchBgCanvas.getContext('2d');
     sketchDrawCtx = sketchDrawCanvas.getContext('2d');
 
     setSketchBackground('blank');
-    //document.getElementById('sketch-caption').value = pendingSketchCaption || '';
     document.getElementById('sketch-window').classList.add('show');
 
     sketchDrawCanvas.removeEventListener('pointerdown', sketchPointerDown);
@@ -514,3 +520,20 @@ function saveSketchNote() {
 
     closeSketchOverlay();
 }
+// ---- Ricezione Schizzo da PencilKit (Swift) ----
+window.receiveNativeSketch = function(dataUrl) {
+    if (!dataUrl) return;
+
+    // Estrae il Base64 e genera il nome file
+    pendingSketchBase64 = dataUrl.split(',')[1];
+    pendingSketchFilename = 'note_sketch_' + Date.now() + '.png';
+
+    // Aggiorna l'anteprima nell'interfaccia
+    const imgPreview = document.getElementById('sketch-preview');
+    if (imgPreview) imgPreview.src = dataUrl;
+
+    const wrapper = document.getElementById('sketch-preview-wrapper');
+    const btn = document.getElementById('sketch-open-btn');
+    if (wrapper) wrapper.style.display = 'block';
+    if (btn) btn.style.display = 'none';
+};

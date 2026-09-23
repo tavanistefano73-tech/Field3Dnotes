@@ -27,15 +27,25 @@ window.addEventListener('pointerup', e => {
     }
 });
 
+function supportsOrientation(type) {
+    return type === 'polyline';
+}
+
 function toggleDigitizing() {
     if (!loadedMesh) return alert("Load a 3D model first!");
     deselectFeature();
     
     if (!isDigitizing) {
+        cancelCurrentDigitizing();
+
         isDigitizing = true;
         const btn = document.getElementById('btn-toggle-digitize');
-        btn.textContent = "⏹ Stop Digitizing"; btn.className = "stop-btn";
-        document.getElementById('status').textContent = 'Digitizing Active...';
+        if (btn) {
+            btn.textContent = "⏹ Stop Digitizing";
+            btn.className = "stop-btn";
+        }
+        const statusEl = document.getElementById('status');
+        if (statusEl) statusEl.textContent = 'Digitizing Active...';
     } else {
         stopDigitizing();
     }
@@ -43,24 +53,43 @@ function toggleDigitizing() {
 
 function cancelCurrentDigitizing() {
     isDigitizing = false;
-    if (currentPlaneMesh) { scene.remove(currentPlaneMesh); safeDispose(currentPlaneMesh); currentPlaneMesh = null; }
-    if (currentPlaneWireframe) { scene.remove(currentPlaneWireframe); safeDispose(currentPlaneWireframe); currentPlaneWireframe = null; }
-    if (currentPointsObj) { scene.remove(currentPointsObj); safeDispose(currentPointsObj); currentPointsObj = null; }
-    if (currentLineMesh) { scene.remove(currentLineMesh); safeDispose(currentLineMesh); currentLineMesh = null; }    currentPoints = []; currentPlaneCorners = null;
+    
+    if (typeof currentPlaneMesh !== 'undefined' && currentPlaneMesh) { scene.remove(currentPlaneMesh); safeDispose(currentPlaneMesh); currentPlaneMesh = null; }
+    if (typeof currentPlaneWireframe !== 'undefined' && currentPlaneWireframe) { scene.remove(currentPlaneWireframe); safeDispose(currentPlaneWireframe); currentPlaneWireframe = null; }
+    if (typeof currentPointsObj !== 'undefined' && currentPointsObj) { scene.remove(currentPointsObj); safeDispose(currentPointsObj); currentPointsObj = null; }
+    if (typeof currentLineMesh !== 'undefined' && currentLineMesh) { scene.remove(currentLineMesh); safeDispose(currentLineMesh); currentLineMesh = null; }
+    
+    currentPoints = [];
+    currentPlaneCorners = null;
 
     const btn = document.getElementById('btn-toggle-digitize');
-    if (btn) { btn.textContent = "▶ Start Digitizing"; btn.className = "start-btn"; }
-    updateUI();
+    if (btn) {
+        const mode = document.getElementById('digitize-mode')?.value;
+        if (mode === 'note') btn.textContent = "▶ Place Note";
+        else if (mode === 'draped_polygon') btn.textContent = "▶ Draw Polygon";
+        else btn.textContent = "▶ Start Digitizing";
+        
+        btn.className = "start-btn";
+    }
+    if (typeof updateUI === 'function') updateUI();
 }
 
 function stopDigitizing() {
     isDigitizing = false;
-    finishFeature();
-    const btn = document.getElementById('btn-toggle-digitize');
-    if (btn) {
-        const mode = document.getElementById('digitize-mode').value;
-        btn.textContent = (mode === 'note') ? "▶ Place Note" : "▶ Start Digitizing";
-        btn.className = "start-btn";
+    try {
+        finishFeature();
+    } catch (err) {
+        console.error("Error while finishing feature:", err);
+    } finally {
+        const btn = document.getElementById('btn-toggle-digitize');
+        if (btn) {
+            const mode = document.getElementById('digitize-mode')?.value;
+            if (mode === 'note') btn.textContent = "▶ Place Note";
+            else if (mode === 'draped_polygon') btn.textContent = "▶ Draw Polygon";
+            else btn.textContent = "▶ Start Digitizing";
+            
+            btn.className = "start-btn";
+        }
     }
 }
 
@@ -130,53 +159,77 @@ function calculatePlaneCornersForPoints(points) {
     return ellipsePoints;
 }
 
+function resetBestFitUI() {
+    const ids = ['collinear-val', 'coplanar-val', 'strike-val', 'dipdir-val', 'dip-val', 'bestfit-strike', 'bestfit-dipdir', 'bestfit-dip'];
+    ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = '-';
+    });
+}
+
 function updateBestFitPlane() {
     if (currentPlaneMesh) { scene.remove(currentPlaneMesh); safeDispose(currentPlaneMesh); currentPlaneMesh = null; }
     if (currentPlaneWireframe) { scene.remove(currentPlaneWireframe); safeDispose(currentPlaneWireframe); currentPlaneWireframe = null; }
     
-    if (currentPoints.length < 3) {
-        document.getElementById('collinear-val').textContent = '-';
-        document.getElementById('coplanar-val').textContent = '-';
+    if (!currentPoints || currentPoints.length < 3) {
+        if (typeof resetBestFitUI === 'function') resetBestFitUI();
         return;
     }
 
-    const centroid = new THREE.Vector3();
-    currentPoints.forEach(p => centroid.add(p)); centroid.divideScalar(currentPoints.length);
+    // 1. Converti i punti locali Three.js in coordinate GIS [x, y, z] (stesso formato usato dal GeoJSON)
+    const tc = typeof threeCenter !== 'undefined' ? threeCenter : { x: 0, y: 0, z: 0 };
+    const po = typeof pythonOffset !== 'undefined' ? pythonOffset : { x: 0, y: 0, z: 0 };
 
-    let xx=0, xy=0, xz=0, yy=0, yz=0, zz=0;
-    currentPoints.forEach(p => {
-        let dx = p.x - centroid.x, dy = p.y - centroid.y, dz = p.z - centroid.z;
-        xx += dx*dx; xy += dx*dy; xz += dx*dz; yy += dy*dy; yz += dy*dz; zz += dz*dz;
-    });
-    let N = currentPoints.length;
-    let eig = getEigen3x3({ xx: xx/N, xy: xy/N, xz: xz/N, yy: yy/N, yz: yz/N, zz: zz/N });
-    let sumEig = eig.valMin + eig.valMed + eig.valMax;
+    const gisPoints = currentPoints.map(p => [
+        p.x + tc.x + po.x,
+        -p.z - tc.z + po.y,
+        p.y + tc.y + po.z
+    ]);
 
-    let eMin = sumEig > 0 ? eig.valMin / sumEig : 0;
-    let eMed = sumEig > 0 ? eig.valMed / sumEig : 0;
-    let eMax = sumEig > 0 ? eig.valMax / sumEig : 0;
-
-    document.getElementById('collinear-val').textContent = eMed > 1e-7 ? (eMax / eMed).toFixed(2) : "∞";
-    document.getElementById('coplanar-val').textContent = eMin > 1e-7 ? (1.0 / eMin).toFixed(2) : "∞";
-
-    currentPlaneCorners = calculatePlaneCornersForPoints(currentPoints);
-
-    if (currentPlaneCorners) {
-        let vertices = [];
-        for (let i = 0; i < currentPlaneCorners.length; i++) {
-            let p1 = currentPlaneCorners[i], p2 = currentPlaneCorners[(i + 1) % currentPlaneCorners.length];
-            vertices.push(centroid.x, centroid.y, centroid.z, p1.x, p1.y, p1.z, p2.x, p2.y, p2.z);
+    // 2. Esegui la PCA SOLO ed ESCLUSIVAMENTE per le polilinee 'polyline'
+    const mode = document.getElementById('digitize-mode')?.value;
+    if (supportsOrientation(mode) && typeof calculatePCAAndOrientationJS === 'function') {
+        try {
+            const pca = calculatePCAAndOrientationJS(gisPoints);
+            
+            setTxt('strike-val', pca.strike.toFixed(1) + '°');
+            setTxt('dipdir-val', pca.dipDir.toFixed(1) + '°');
+            setTxt('dip-val', pca.dip.toFixed(1) + '°');
+            
+            setTxt('collinear-val', pca.valMed > 1e-7 ? (pca.valMax / pca.valMed).toFixed(2) : "∞");
+            setTxt('coplanar-val', pca.valMin > 1e-7 ? (1.0 / pca.valMin).toFixed(2) : "∞");
+        } catch (e) {
+            console.warn("Real-time PCA calculation error:", e);
         }
-        const planeGeo = new THREE.BufferGeometry();
-        planeGeo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-        planeGeo.computeVertexNormals();
+    } else {
+        if (typeof resetBestFitUI === 'function') resetBestFitUI();
+    }
 
-        currentPlaneMesh = new THREE.Mesh(planeGeo, new THREE.MeshBasicMaterial({ color: 0x00aaff, transparent: true, opacity: 0.35, side: THREE.DoubleSide }));
-        scene.add(currentPlaneMesh);
+    // 3. Genera la geometria del Best Fit Plane solo per polyline
+    if (supportsOrientation(mode) && typeof calculatePlaneCornersForPoints === 'function') {
+        currentPlaneCorners = calculatePlaneCornersForPoints(currentPoints);
 
-        const lineGeo = new THREE.BufferGeometry().setFromPoints([...currentPlaneCorners, currentPlaneCorners[0]]);
-        currentPlaneWireframe = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: 0x00ffff, linewidth: 2 }));
-        scene.add(currentPlaneWireframe);
+        if (currentPlaneCorners) {
+            const centroid = new THREE.Vector3();
+            currentPoints.forEach(p => centroid.add(p));
+            centroid.divideScalar(currentPoints.length);
+
+            let vertices = [];
+            for (let i = 0; i < currentPlaneCorners.length; i++) {
+                let p1 = currentPlaneCorners[i], p2 = currentPlaneCorners[(i + 1) % currentPlaneCorners.length];
+                vertices.push(centroid.x, centroid.y, centroid.z, p1.x, p1.y, p1.z, p2.x, p2.y, p2.z);
+            }
+            const planeGeo = new THREE.BufferGeometry();
+            planeGeo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+            planeGeo.computeVertexNormals();
+
+            currentPlaneMesh = new THREE.Mesh(planeGeo, new THREE.MeshBasicMaterial({ color: 0x00aaff, transparent: true, opacity: 0.35, side: THREE.DoubleSide }));
+            scene.add(currentPlaneMesh);
+
+            const lineGeo = new THREE.BufferGeometry().setFromPoints([...currentPlaneCorners, currentPlaneCorners[0]]);
+            currentPlaneWireframe = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: 0x00ffff, linewidth: 2 }));
+            scene.add(currentPlaneWireframe);
+        }
     }
 }
 
@@ -238,7 +291,6 @@ function createRakeIndicator(strike, dip, rake, sense) {
     const dipRad = (dip * Math.PI) / 180.0;
     const rakeRad = (rake * Math.PI) / 180.0;
 
-    // Orientation vectors in GIS coordinates
     const strikeVec = { e: Math.sin(strikeRad), n: Math.cos(strikeRad), z: 0 };
     const dipVec = {
         e: Math.sin(dipDirRad) * Math.cos(dipRad),
@@ -246,14 +298,12 @@ function createRakeIndicator(strike, dip, rake, sense) {
         z: -Math.sin(dipRad)
     };
 
-    // Rake vector along the plane
     const e = Math.cos(rakeRad) * strikeVec.e + Math.sin(rakeRad) * dipVec.e;
     const n = Math.cos(rakeRad) * strikeVec.n + Math.sin(rakeRad) * dipVec.n;
     const z = Math.cos(rakeRad) * strikeVec.z + Math.sin(rakeRad) * dipVec.z;
 
     const dirThree = new THREE.Vector3(e, z, -n).normalize();
 
-    // Plane normal in Three.js coordinates
     const nx_gis = Math.sin(dipDirRad) * Math.sin(dipRad);
     const ny_gis = Math.cos(dipDirRad) * Math.sin(dipRad);
     const nz_gis = Math.cos(dipRad);
@@ -267,23 +317,16 @@ function createRakeIndicator(strike, dip, rake, sense) {
 
     if (hasReverse) dirThree.negate();
 
-    // 1. Normal / Reverse Faults: Classic single arrow
     if (hasNormal || hasReverse) {
         const arrow = new THREE.ArrowHelper(dirThree, new THREE.Vector3(0, 0, 0), 1.3, 0xffff00, 0.4, 0.25);
         arrow.traverse(c => c.userData.isIndicator = true);
         return arrow;
     }
-    // 2. Strike-slip faults (Left / Right Lateral)
     else if (hasLeft || hasRight) {
         const group = new THREE.Group();
-        
-        // Transverse axis lying on the plane
         const sideVec = new THREE.Vector3().crossVectors(normalThree, dirThree).normalize();
-
-        // Distance from center
         const circleRadius = 0.9;
 
-        // Central rake line
         const startPt = dirThree.clone().multiplyScalar(-circleRadius);
         const endPt = dirThree.clone().multiplyScalar(circleRadius);
         const lineGeo = new THREE.BufferGeometry().setFromPoints([startPt, endPt]);
@@ -318,7 +361,6 @@ function createRakeIndicator(strike, dip, rake, sense) {
             return coneGroup;
         }
 
-        // Base configuration for the two cones
         const dirTop = dirThree.clone().negate();
         const dirBottom = dirThree.clone();
 
@@ -331,8 +373,6 @@ function createRakeIndicator(strike, dip, rake, sense) {
         group.add(coneTop);
         group.add(coneBottom);
 
-        // Rotate the entire block by 180° around the plane normal
-        // for Left Lateral with Rake > 90° or Right Lateral with Rake < 90°
         const absRake = Math.abs(rake);
         const shouldFlip = (hasLeft && absRake > 90) || (hasRight && absRake < 90);
 
@@ -343,7 +383,6 @@ function createRakeIndicator(strike, dip, rake, sense) {
         group.traverse(c => c.userData.isIndicator = true);
         return group;
     }
-    // 3. Undefined values
     else {
         const start = dirThree.clone().multiplyScalar(-1.3);
         const end = dirThree.clone().multiplyScalar(1.3);
@@ -367,6 +406,27 @@ function updateSpotDisksScale() {
             f.group.scale.set(worldRadius, worldRadius, worldRadius);
         }
     });
+}
+
+function updatePolygonPreviewLine() {
+    if (currentLineMesh) { scene.remove(currentLineMesh); safeDispose(currentLineMesh); currentLineMesh = null; }
+    if (currentPointsObj) { scene.remove(currentPointsObj); safeDispose(currentPointsObj); currentPointsObj = null; }
+
+    if (currentPoints.length === 0) return;
+
+    currentPointsObj = new THREE.Points(new THREE.BufferGeometry().setFromPoints(currentPoints), activePointsMat);
+    scene.add(currentPointsObj);
+
+    if (currentPoints.length < 2) return;
+
+    const pointsToRender = [...currentPoints];
+    if (currentPoints.length >= 3) {
+        pointsToRender.push(currentPoints[0]);
+    }
+
+    const lineGeo = new THREE.BufferGeometry().setFromPoints(pointsToRender);
+    currentLineMesh = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: 0x00e676, linewidth: 2 }));
+    scene.add(currentLineMesh);
 }
 
 function addPointAtMouse(e) {
@@ -449,6 +509,13 @@ function addPointAtMouse(e) {
 
     currentPoints.push(pt);
 
+    if (mode === 'draped_polygon') {
+        updatePolygonPreviewLine();
+        updateUI();
+        document.getElementById('status').textContent = 'Polygon Point #' + currentPoints.length + ' Added';
+        return;
+    }
+
     if (currentPointsObj) { scene.remove(currentPointsObj); safeDispose(currentPointsObj); }
     currentPointsObj = new THREE.Points(new THREE.BufferGeometry().setFromPoints(currentPoints), activePointsMat);
     scene.add(currentPointsObj);
@@ -459,17 +526,14 @@ function addPointAtMouse(e) {
         scene.add(currentLineMesh);
     }
 
-    if (mode === 'polyline') {
+    if (supportsOrientation(mode)) {
         updateBestFitPlane();
-    } else if (mode === 'simple_polyline') {
+    } else {
         if (typeof currentPlaneMesh !== 'undefined' && currentPlaneMesh) {
             safeDispose(currentPlaneMesh);
             currentPlaneMesh = null;
         }
-        const colEl = document.getElementById('collinear-val');
-        const copEl = document.getElementById('coplanar-val');
-        if (colEl) colEl.textContent = '-';
-        if (copEl) copEl.textContent = '-';
+        if (typeof resetBestFitUI === 'function') resetBestFitUI();
     }
 
     updateUI();
@@ -501,56 +565,202 @@ function createFeatureGroup(savedPoints, savedCorners) {
     return featGroup;
 }
 
-function finishFeature() {
-    if (currentPoints.length > 1) {
-        const currentFeatId = featureCounter++;
-        const savedPoints = [...currentPoints];
-        
-        // Check current mode
-        const mode = document.getElementById('digitize-mode')?.value;
-        const isSimple = (mode === 'simple_polyline');
+// Funzione helper per fotografare la vista e il clipping attuali
+function captureSceneState() {
+    return {
+        camera: {
+            position: [camera.position.x, camera.position.y, camera.position.z],
+            target: (typeof controls !== 'undefined' && controls.target)
+                ? [controls.target.x, controls.target.y, controls.target.z]
+                : [0, 0, 0],
+            fov: camera.fov
+        },
+        clipping: {
+            enabled: (typeof renderer !== 'undefined') ? renderer.localClippingEnabled || false : false,
+            plane: (typeof clippingPlane !== 'undefined' && clippingPlane) ? {
+                normal: [clippingPlane.normal.x, clippingPlane.normal.y, clippingPlane.normal.z],
+                constant: clippingPlane.constant
+            } : null
+        }
+    };
+}
 
-        // If simple polyline, ignore any plane corners
-        const savedCorners = (!isSimple && currentPlaneCorners) ? [...currentPlaneCorners] : null;
+async function finishFeature() {
+    const mode = document.getElementById('digitize-mode')?.value;
 
-        const featGroup = createFeatureGroup(savedPoints, savedCorners);
-        featGroup.userData.featureId = currentFeatId;
-        featGroup.traverse(c => { c.userData.featureId = currentFeatId; });
-        scene.add(featGroup);
+    try {
+        // ==========================================
+        // 1. POLIGONO DRAPPEGGIATO (is_draped_polygon: true)
+        // ==========================================
+        // ==========================================
+                // 1. POLIGONO DRAPPEGGIATO (is_draped_polygon: true)
+                // ==========================================
+                if (mode === 'draped_polygon') {
+                    if (currentPoints.length < 3) {
+                                    alert("Please add at least 3 points to define the polygon perimeter.");
+                                    return;
+                                }
 
-        digitizedFeatures.push({
-            id: currentFeatId,
-            is_manual_spot: false,
-            is_simple_polyline: isSimple, // 👈 ADDED: Store type in RAM
-            f_type: document.getElementById('input-type').value || '',
-            unit: document.getElementById('input-unit').value || '',
-            set: document.getElementById('input-set').value || '',
-            custom_fields: typeof getCustomFieldsValues === 'function' ? getCustomFieldsValues() : {},
-            line: savedPoints.map(p => [
+                                const initialColor = document.getElementById('input-color')?.value || '#00e676';
+                                const selectedColor = await askColorWithPicker(initialColor);
+                                if (!selectedColor) return;
+
+                                const currentFeatId = featureCounter++;
+                                const closedPoints = [...currentPoints, currentPoints[0].clone()];
+                                const planeBasis = getPolygonPlaneBasis(closedPoints);
+
+                                // Riscampiona proiettando direttamente con la camera corrente
+                                const resampled3DPoints = resamplePathOnMesh(closedPoints, loadedMesh, planeBasis, 10, camera);
+                                const polyGroup = createColoredDrapedMesh(resampled3DPoints, closedPoints, loadedMesh, parseInt(selectedColor.replace('#', ''), 16));
+
+                                polyGroup.userData.featureId = currentFeatId;
+                                polyGroup.traverse(c => { c.userData.featureId = currentFeatId; });
+                                scene.add(polyGroup);
+
+                                // CAPTURA DEI PARAMETRI ESATTI DELLA SCENA AL MOMENTO DEL SALVATAGGIO
+                                const currentViewContext = {
+                                    camera_position: [camera.position.x, camera.position.y, camera.position.z],
+                                    camera_rotation: [camera.rotation.x, camera.rotation.y, camera.rotation.z],
+                                    camera_fov: camera.fov,
+                                    clipping_planes: (typeof renderer !== 'undefined' && renderer.clippingPlanes) ?
+                                        renderer.clippingPlanes.map(p => ({ normal: [p.normal.x, p.normal.y, p.normal.z], constant: p.constant })) : []
+                                };
+
+                                const gisPoints = closedPoints.map(p => [
+                                    p.x + threeCenter.x + pythonOffset.x,
+                                    -p.z - threeCenter.z + pythonOffset.y,
+                                    p.y + threeCenter.y + pythonOffset.z
+                                ]);
+
+                                digitizedFeatures.push({
+                                    id: currentFeatId,
+                                    is_manual_spot: false,
+                                    is_draped_polygon: true,
+                                    is_simple_polyline: false,
+                                    color: selectedColor,
+                                    strike: null,
+                                    dip_dir: null,
+                                    dip: null,
+                                    f_type: document.getElementById('input-type')?.value || '',
+                                    unit: document.getElementById('input-unit')?.value || '',
+                                    set: document.getElementById('input-set')?.value || '',
+                                    custom_fields: typeof getCustomFieldsValues === 'function' ? getCustomFieldsValues() : {},
+                                    points: gisPoints,
+                                    polygon: gisPoints,
+                                    line: gisPoints,
+                                    points_count: gisPoints.length,
+                                    group: polyGroup,
+                                    mode: mode,
+                                    // SALVATAGGIO PARAMETRI SCENA NELL'OGGETTO FEATURE
+                                    view_context: currentViewContext
+                                });
+
+                                if (typeof selectedFeatureId !== 'undefined') selectedFeatureId = currentFeatId;
+                                document.getElementById('status').textContent = 'Draped Polygon #' + currentFeatId + ' Saved ✓';
+                            }
+
+        // ==========================================
+        // 2. POLILINEA BEST-FIT (orientation)
+        // ==========================================
+        else if (mode === 'polyline') {
+            if (currentPoints.length < 2) return;
+
+            const currentFeatId = featureCounter++;
+            const gisPoints = currentPoints.map(p => [
                 p.x + threeCenter.x + pythonOffset.x,
                 -p.z - threeCenter.z + pythonOffset.y,
                 p.y + threeCenter.y + pythonOffset.z
-            ]),
-            polygon: savedCorners ? savedCorners.map(p => [
+            ]);
+
+            const cornersToSave = currentPoints.length >= 3 ? calculatePlaneCornersForPoints(currentPoints) : null;
+            const featGroup = createFeatureGroup(currentPoints, cornersToSave);
+            featGroup.userData.featureId = currentFeatId;
+            featGroup.traverse(c => { c.userData.featureId = currentFeatId; });
+            scene.add(featGroup);
+
+            // Calcolo orientamento PCA SOLO ed ESCLUSIVAMENTE per il Best-Fit ('polyline')
+            const pcaStats = calculatePCAAndOrientationJS(gisPoints);
+
+            const featureData = {
+                id: currentFeatId,
+                is_manual_spot: false,
+                is_draped_polygon: false,
+                is_simple_polyline: false,
+                f_type: document.getElementById('input-type')?.value || '',
+                unit: document.getElementById('input-unit')?.value || '',
+                set: document.getElementById('input-set')?.value || '',
+                custom_fields: typeof getCustomFieldsValues === 'function' ? getCustomFieldsValues() : {},
+                points: gisPoints,
+                line: gisPoints,
+                points_count: gisPoints.length,
+                group: featGroup,
+                mode: mode
+            };
+
+            if (currentPoints.length >= 3) {
+                featureData.strike = pcaStats.strike;
+                featureData.dip_dir = pcaStats.dipDir;
+                featureData.dip = pcaStats.dip;
+                featureData.val_min = pcaStats.valMin;
+                featureData.val_med = pcaStats.valMed;
+                featureData.val_max = pcaStats.valMax;
+            }
+
+            digitizedFeatures.push(featureData);
+            if (typeof selectedFeatureId !== 'undefined') selectedFeatureId = currentFeatId;
+            document.getElementById('status').textContent = 'Best-Fit Polyline #' + currentFeatId + ' Saved ✓';
+        }
+
+        // ==========================================
+        // 3. POLILINEA SEMPLICE (is_simple_polyline: true)
+        // ==========================================
+        else if (mode === 'simple_polyline') {
+            if (currentPoints.length < 2) return;
+
+            const currentFeatId = featureCounter++;
+            const gisPoints = currentPoints.map(p => [
                 p.x + threeCenter.x + pythonOffset.x,
                 -p.z - threeCenter.z + pythonOffset.y,
                 p.y + threeCenter.y + pythonOffset.z
-            ]) : null,
-            group: featGroup
-        });
+            ]);
 
-        document.getElementById('status').textContent = 'Feature #' + currentFeatId + ' Saved ✓';
+            const featGroup = createFeatureGroup(currentPoints, null);
+            featGroup.userData.featureId = currentFeatId;
+            featGroup.traverse(c => { c.userData.featureId = currentFeatId; });
+            scene.add(featGroup);
+
+            digitizedFeatures.push({
+                id: currentFeatId,
+                is_manual_spot: false,
+                is_draped_polygon: false,
+                is_simple_polyline: true,
+                f_type: document.getElementById('input-type')?.value || '',
+                unit: document.getElementById('input-unit')?.value || '',
+                set: document.getElementById('input-set')?.value || '',
+                custom_fields: typeof getCustomFieldsValues === 'function' ? getCustomFieldsValues() : {},
+                points: gisPoints,
+                line: gisPoints,
+                points_count: gisPoints.length,
+                group: featGroup,
+                mode: mode
+            });
+
+            if (typeof selectedFeatureId !== 'undefined') selectedFeatureId = currentFeatId;
+            document.getElementById('status').textContent = 'Simple Polyline #' + currentFeatId + ' Saved ✓';
+        }
+
+    } finally {
+        if (currentPlaneMesh) { scene.remove(currentPlaneMesh); safeDispose(currentPlaneMesh); currentPlaneMesh = null; }
+        if (currentPlaneWireframe) { scene.remove(currentPlaneWireframe); safeDispose(currentPlaneWireframe); currentPlaneWireframe = null; }
+        if (currentPointsObj) { scene.remove(currentPointsObj); safeDispose(currentPointsObj); currentPointsObj = null; }
+        if (currentLineMesh) { scene.remove(currentLineMesh); safeDispose(currentLineMesh); currentLineMesh = null; }
+
+        currentPoints = [];
+        currentPlaneCorners = null;
+
+        updateVisibilityFiltersUI();
+        updateUI();
     }
-
-    if (currentPlaneMesh) { scene.remove(currentPlaneMesh); safeDispose(currentPlaneMesh); currentPlaneMesh = null; }
-    if (currentPlaneWireframe) { scene.remove(currentPlaneWireframe); safeDispose(currentPlaneWireframe); currentPlaneWireframe = null; }
-    if (currentPointsObj) { scene.remove(currentPointsObj); safeDispose(currentPointsObj); currentPointsObj = null; }
-    if (currentLineMesh) { scene.remove(currentLineMesh); safeDispose(currentLineMesh); currentLineMesh = null; }
-    currentPoints = []; currentPlaneCorners = null;
-    document.getElementById('collinear-val').textContent = '-';
-    document.getElementById('coplanar-val').textContent = '-';
-
-    updateVisibilityFiltersUI(); updateUI();
 }
 
 function calculatePCAAndOrientationJS(pointsGis) {
@@ -576,14 +786,13 @@ function calculatePCAAndOrientationJS(pointsGis) {
     nx /= normLen; ny /= normLen; nz /= normLen;
     let dip = Math.acos(Math.min(1.0, Math.abs(nz))) * (180.0 / Math.PI);
 
-    let dnx = nz < 0 ? -nx : nx;  // ← Inverti il condition
+    let dnx = nz < 0 ? -nx : nx;
     let dny = nz < 0 ? -ny : ny;
 
     let dipDir = 0, strike = 0;
     if (Math.abs(dnx) >= 1e-9 || Math.abs(dny) >= 1e-9) {
         dipDir = (Math.atan2(dnx, dny) * (180.0 / Math.PI) + 360.0) % 360.0;
         strike = (dipDir - 90.0 + 360.0) % 360.0;
-        
     }
 
     return {
@@ -594,4 +803,196 @@ function calculatePCAAndOrientationJS(pointsGis) {
         dipDir: parseFloat(dipDir.toFixed(2)),
         dip: parseFloat(dip.toFixed(2))
     };
+}
+
+function getPolygonPlaneBasis(points) {
+    const centroid = new THREE.Vector3();
+    points.forEach(p => centroid.add(p));
+    centroid.divideScalar(points.length);
+
+    let xx = 0, xy = 0, xz = 0, yy = 0, yz = 0, zz = 0;
+    points.forEach(p => {
+        const dx = p.x - centroid.x, dy = p.y - centroid.y, dz = p.z - centroid.z;
+        xx += dx * dx; xy += dx * dy; xz += dx * dz;
+        yy += dy * dy; yz += dy * dz; zz += dz * dz;
+    });
+
+    const N = points.length;
+    const eig = getEigen3x3({ xx: xx / N, xy: xy / N, xz: xz / N, yy: yy / N, yz: yz / N, zz: zz / N });
+
+    return {
+        centroid: centroid,
+        uAxis: eig.vecMax.clone().normalize(),
+        vAxis: eig.vecMed.clone().normalize(),
+        normal: eig.vecMin.clone().normalize()
+    };
+}
+
+function projectToPlane2D(point3D, planeBasis) {
+    const rel = new THREE.Vector3().subVectors(point3D, planeBasis.centroid);
+    return {
+        x: rel.dot(planeBasis.uAxis),
+        y: rel.dot(planeBasis.vAxis)
+    };
+}
+
+function resamplePathOnMesh(points, terrainMesh, planeBasis, samplesPerSegment = 8, activeCamera = null) {
+    if (!terrainMesh || points.length < 2) return points;
+
+    const resampled = [];
+    const raycaster = new THREE.Raycaster();
+
+    // 1. Applica i piani di clipping attivi al raycaster per rispettare le sezioni di taglio
+    if (typeof renderer !== 'undefined' && renderer.clippingPlanes && renderer.clippingPlanes.length > 0) {
+        raycaster.clippingPlanes = renderer.clippingPlanes;
+    }
+
+    const cam = activeCamera || camera;
+    const camPos = cam.position.clone(); // Posizione nativa della camera in Three.js
+
+    for (let i = 0; i < points.length - 1; i++) {
+        const pA = points[i]; // Coordinate gia' in spazio Three.js
+        const pB = points[i + 1];
+
+        resampled.push(pA.clone());
+
+        for (let s = 1; s < samplesPerSegment; s++) {
+            const t = s / samplesPerSegment;
+            // Interpolazione nello spazio Three.js (senza scambiare Y e Z!)
+            const interp = new THREE.Vector3().lerpVectors(pA, pB, t);
+
+            // Vettore direzione reale: dalla Camera (3D) verso il Punto nello schermo (3D)
+            const rayDir = new THREE.Vector3().subVectors(interp, camPos).normalize();
+
+            // Raycast in coordinate native Three.js
+            raycaster.set(camPos, rayDir);
+            let intersects = raycaster.intersectObject(terrainMesh, true);
+
+            if (intersects.length > 0) {
+                const hitPt = intersects[0].point.clone();
+                // Calcola la normale di superficie per staccare leggermente il poligono (anti z-fighting)
+                const surfNorm = intersects[0].face
+                    ? intersects[0].face.normal.clone().transformDirection(intersects[0].object.matrixWorld)
+                    : planeBasis.normal;
+                
+                hitPt.addScaledVector(surfNorm, 0.03);
+                resampled.push(hitPt);
+            } else {
+                resampled.push(interp);
+            }
+        }
+    }
+    resampled.push(points[points.length - 1].clone());
+    return resampled;
+}
+function createColoredDrapedMesh(resampled3DPoints, originalBoundaryPoints, terrainMesh, colorHex) {
+    const group = new THREE.Group();
+
+    // 1. Linea di bordo (perimetro visibile)
+    const lineGeo = new THREE.BufferGeometry().setFromPoints(resampled3DPoints);
+    const lineMat = new THREE.LineBasicMaterial({ color: colorHex, linewidth: 2 });
+    const lineMesh = new THREE.Line(lineGeo, lineMat);
+    group.add(lineMesh);
+
+    // 2. Generazione superficie riempita (senza estrusioni a 90 gradi)
+    if (resampled3DPoints.length >= 3) {
+        // Triangolazione 2D rispetto al piano di vista dello schermo
+        const shape = new THREE.Shape();
+        
+        // Convertiamo i punti in coordinate dello schermo per triangolare correttamente dalla vista attuale
+        const projPoints = resampled3DPoints.map(pt => {
+            const p = pt.clone().project(camera);
+            return new THREE.Vector2(p.x, p.y);
+        });
+
+        shape.moveTo(projPoints[0].x, projPoints[0].y);
+        for (let i = 1; i < projPoints.length; i++) {
+            shape.lineTo(projPoints[i].x, projPoints[i].y);
+        }
+
+        const shapeGeo = new THREE.ShapeGeometry(shape);
+        const posAttr = shapeGeo.attributes.position;
+
+        // Rimappiamo ogni vertice triangolato 2D al suo corrispondente punto 3D reale sulla superficie
+        // evitando estrusioni o estensioni lungo l'asse Z/Y
+        for (let i = 0; i < posAttr.count; i++) {
+            const idx = Math.min(i, resampled3DPoints.length - 1);
+            posAttr.setXYZ(i, resampled3DPoints[idx].x, resampled3DPoints[idx].y, resampled3DPoints[idx].z);
+        }
+        
+        shapeGeo.computeVertexNormals();
+
+        const meshMat = new THREE.MeshBasicMaterial({
+            color: colorHex,
+            transparent: true,
+            opacity: 0.45,
+            side: THREE.DoubleSide,
+            depthTest: true,
+            depthWrite: false // Evita sovrapposizioni errate
+        });
+
+        const fillMesh = new THREE.Mesh(shapeGeo, meshMat);
+        group.add(fillMesh);
+    }
+
+    return group;
+}
+
+function pointInPolygon2D(px, py, polygon2D) {
+    let inside = false;
+    for (let i = 0, j = polygon2D.length - 1; i < polygon2D.length; j = i++) {
+        const xi = polygon2D[i].x, yi = polygon2D[i].y;
+        const xj = polygon2D[j].x, yj = polygon2D[j].y;
+        
+        const intersect = ((yi > py) !== (yj > py)) &&
+            (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
+        if (intersect) inside = !inside;
+    }
+    return inside;
+}
+
+function askColorWithPicker(defaultColor = '#00e676') {
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = `
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(0, 0, 0, 0.5); display: flex; align-items: center;
+            justify-content: center; z-index: 10000; font-family: sans-serif;
+        `;
+
+        const modal = document.createElement('div');
+        modal.style.cssText = `
+            background: #ffffff; padding: 20px 25px; border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3); text-align: center; min-width: 240px;
+        `;
+        modal.innerHTML = `
+            <h4 style="margin: 0 0 15px 0; color: #333;">Select color</h4>
+            <input type="color" id="popup-color-picker" value="${defaultColor}" 
+                   style="width: 80px; height: 45px; border: none; cursor: pointer; background: none;">
+            <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: center;">
+                <button id="btn-color-ok" style="padding: 8px 16px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">Apply</button>
+                <button id="btn-color-cancel" style="padding: 8px 16px; background: #e0e0e0; color: #333; border: none; border-radius: 4px; cursor: pointer;">Cancel</button>
+            </div>
+        `;
+
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+
+        const colorInput = modal.querySelector('#popup-color-picker');
+        const btnOk = modal.querySelector('#btn-color-ok');
+        const btnCancel = modal.querySelector('#btn-color-cancel');
+
+        setTimeout(() => colorInput.click(), 100);
+
+        btnOk.onclick = () => {
+            const chosenColor = colorInput.value;
+            document.body.removeChild(overlay);
+            resolve(chosenColor);
+        };
+
+        btnCancel.onclick = () => {
+            document.body.removeChild(overlay);
+            resolve(null);
+        };
+    });
 }

@@ -1,3 +1,4 @@
+
 const DRACO_LOCAL_PATH = new URL('js/libs/draco/', window.location.href).href;
 /**
  * Pulizia essenziale della VRAM per la memoria GPU.
@@ -109,7 +110,7 @@ async function loadOBJModel(mainFile, fileMap = {}) {
                                 URL.revokeObjectURL(blobUrl);
                                 resolve();
                             }, undefined, () => {
-                                console.warn("Errore caricamento texture:", texName);
+                                console.warn("Texture loading error:", texName);
                                 URL.revokeObjectURL(blobUrl);
                                 resolve();
                             });
@@ -121,7 +122,7 @@ async function loadOBJModel(mainFile, fileMap = {}) {
             // Attende la risoluzione di tutte le immagini MTL prima di iniziare il Worker
             await Promise.all(texturePromises);
         } catch (err) {
-            console.error("Errore lettura MTL:", err);
+            console.error("MTL reading error:", err);
         }
     }
 
@@ -134,196 +135,233 @@ async function loadOBJModel(mainFile, fileMap = {}) {
 
     // 3. Worker Inline esteso
     const workerCode = `
-        let rawPositions = [];
-        let rawUVs = [];
+            let rawPositions = [];
+            let rawUVs = [];
+            let meshGroups = {}; 
+            let currentMaterial = "default";
+            let remainder = "";
+            let detectedCRS = null;
+            let minX = Infinity, minY = Infinity, minZ = Infinity;
+            let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
 
-        let meshGroups = {}; 
-        let currentMaterial = "default";
+            const decoder = new TextDecoder('utf-8');
+            const MAX_CHUNK_VERTICES = 300000; // Limite vertici per blocco prima dello svuotamento RAM
 
-        let remainder = "";
-        let detectedCRS = null;
-        let minX = Infinity, minY = Infinity, minZ = Infinity;
-        let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+            function flushGroup(mtlName) {
+                const group = meshGroups[mtlName];
+                if (!group || group.positions.length === 0) return;
 
-        const decoder = new TextDecoder('utf-8');
+                const posArray = new Float32Array(group.positions);
+                const uvArray = group.uvs.length > 0 ? new Float32Array(group.uvs) : null;
 
-        self.onmessage = function (e) {
-            const data = e.data;
+                const transferables = [posArray.buffer];
+                if (uvArray) transferables.push(uvArray.buffer);
 
-            if (data.action === 'PARSE_CHUNK') {
-                const textChunk = remainder + decoder.decode(data.buffer, { stream: true });
-                const lastNewLine = textChunk.lastIndexOf('\\n');
+                // Invia la sub-mesh al thread principale e rilascia la memoria nel Worker
+                self.postMessage({
+                    action: 'PARTIAL_MESH',
+                    mtlName: mtlName,
+                    positions: posArray.buffer,
+                    uvs: uvArray ? uvArray.buffer : null
+                }, transferables);
 
-                if (lastNewLine === -1) {
-                    remainder = textChunk;
-                    self.postMessage({ action: 'NEXT_CHUNK' });
-                    return;
-                }
+                group.positions = [];
+                group.uvs = [];
+            }
 
-                const validText = textChunk.substring(0, lastNewLine);
-                remainder = textChunk.substring(lastNewLine + 1);
-                const lines = validText.split('\\n');
+            self.onmessage = function (e) {
+                const data = e.data;
 
-                for (let i = 0; i < lines.length; i++) {
-                    const line = lines[i].trim();
-                    if (!line || line.startsWith('#')) {
-                        if (!detectedCRS && line.startsWith('#')) {
-                            const match = line.match(/EPSG:\\d+/i) || line.match(/CRS:\\s*([\\w:]+)/i);
-                            if (match) detectedCRS = match[0].toUpperCase().replace("CRS:", "").trim();
-                        }
-                        continue;
+                if (data.action === 'PARSE_CHUNK') {
+                    const textChunk = remainder + decoder.decode(data.buffer, { stream: true });
+                    const lastNewLine = textChunk.lastIndexOf('\\n');
+
+                    if (lastNewLine === -1) {
+                        remainder = textChunk;
+                        self.postMessage({ action: 'NEXT_CHUNK' });
+                        return;
                     }
 
-                    if (line.startsWith('usemtl ')) {
-                        currentMaterial = line.substring(7).trim();
-                        if (!meshGroups[currentMaterial]) {
-                            meshGroups[currentMaterial] = { positions: [], uvs: [] };
+                    const validText = textChunk.substring(0, lastNewLine);
+                    remainder = textChunk.substring(lastNewLine + 1);
+                    const lines = validText.split('\\n');
+
+                    for (let i = 0; i < lines.length; i++) {
+                        const line = lines[i].trim();
+                        if (!line || line.startsWith('#')) {
+                            if (!detectedCRS && line.startsWith('#')) {
+                                const match = line.match(/EPSG:\\d+/i) || line.match(/CRS:\\s*([\\w:]+)/i);
+                                if (match) detectedCRS = match[0].toUpperCase().replace("CRS:", "").trim();
+                            }
+                            continue;
                         }
-                    }
-                    else if (line.startsWith('v ')) {
-                        const parts = line.split(/\\s+/);
-                        if (parts.length >= 4) {
-                            const x = parseFloat(parts[1]), y = parseFloat(parts[2]), z = parseFloat(parts[3]);
-                            if (!isNaN(x) && !isNaN(y) && !isNaN(z)) {
-                                rawPositions.push(x, y, z);
-                                if (x < minX) minX = x; if (x > maxX) maxX = x;
-                                if (y < minY) minY = y; if (y > maxY) maxY = y;
-                                if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+
+                        if (line.startsWith('usemtl ')) {
+                            const newMat = line.substring(7).trim();
+                            if (currentMaterial !== newMat && meshGroups[currentMaterial]) {
+                                flushGroup(currentMaterial);
+                            }
+                            currentMaterial = newMat;
+                            if (!meshGroups[currentMaterial]) {
+                                meshGroups[currentMaterial] = { positions: [], uvs: [] };
                             }
                         }
-                    }
-                    else if (line.startsWith('vt ')) {
-                        const parts = line.split(/\\s+/);
-                        if (parts.length >= 3) {
-                            const u = parseFloat(parts[1]), v = parseFloat(parts[2]);
-                            if (!isNaN(u) && !isNaN(v)) rawUVs.push(u, v);
-                        }
-                    }
-                    else if (line.startsWith('f ')) {
-                        if (!meshGroups[currentMaterial]) {
-                            meshGroups[currentMaterial] = { positions: [], uvs: [] };
-                        }
-                        const targetGroup = meshGroups[currentMaterial];
-
-                        const parts = line.split(/\\s+/);
-                        const vIndices = [];
-                        const vtIndices = [];
-
-                        for (let j = 1; j < parts.length; j++) {
-                            const segs = parts[j].split('/');
-                            const vIdx = parseInt(segs[0], 10) - 1;
-                            const vtIdx = segs[1] ? parseInt(segs[1], 10) - 1 : -1;
-
-                            if (!isNaN(vIdx) && vIdx >= 0) vIndices.push(vIdx);
-                            if (!isNaN(vtIdx) && vtIdx >= 0) vtIndices.push(vtIdx);
-                        }
-
-                        for (let j = 1; j < vIndices.length - 1; j++) {
-                            const i0 = vIndices[0], i1 = vIndices[j], i2 = vIndices[j + 1];
-
-                            if (i0 * 3 + 2 < rawPositions.length && i1 * 3 + 2 < rawPositions.length && i2 * 3 + 2 < rawPositions.length) {
-                                targetGroup.positions.push(
-                                    rawPositions[i0 * 3], rawPositions[i0 * 3 + 1], rawPositions[i0 * 3 + 2],
-                                    rawPositions[i1 * 3], rawPositions[i1 * 3 + 1], rawPositions[i1 * 3 + 2],
-                                    rawPositions[i2 * 3], rawPositions[i2 * 3 + 1], rawPositions[i2 * 3 + 2]
-                                );
-
-                                if (vtIndices.length >= vIndices.length) {
-                                    const u0 = vtIndices[0], u1 = vtIndices[j], u2 = vtIndices[j + 1];
-                                    targetGroup.uvs.push(
-                                        rawUVs[u0 * 2], rawUVs[u0 * 2 + 1],
-                                        rawUVs[u1 * 2], rawUVs[u1 * 2 + 1],
-                                        rawUVs[u2 * 2], rawUVs[u2 * 2 + 1]
-                                    );
+                        else if (line.startsWith('v ')) {
+                            const parts = line.split(/\\s+/);
+                            if (parts.length >= 4) {
+                                const x = parseFloat(parts[1]), y = parseFloat(parts[2]), z = parseFloat(parts[3]);
+                                if (!isNaN(x) && !isNaN(y) && !isNaN(z)) {
+                                    rawPositions.push(x, y, z);
+                                    if (x < minX) minX = x; if (x > maxX) maxX = x;
+                                    if (y < minY) minY = y; if (y > maxY) maxY = y;
+                                    if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
                                 }
                             }
                         }
+                        else if (line.startsWith('vt ')) {
+                            const parts = line.split(/\\s+/);
+                            if (parts.length >= 3) {
+                                const u = parseFloat(parts[1]), v = parseFloat(parts[2]);
+                                if (!isNaN(u) && !isNaN(v)) rawUVs.push(u, v);
+                            }
+                        }
+                        else if (line.startsWith('f ')) {
+                            if (!meshGroups[currentMaterial]) {
+                                meshGroups[currentMaterial] = { positions: [], uvs: [] };
+                            }
+                            const targetGroup = meshGroups[currentMaterial];
+
+                            const parts = line.split(/\\s+/);
+                            const vIndices = [];
+                            const vtIndices = [];
+
+                            for (let j = 1; j < parts.length; j++) {
+                                const segs = parts[j].split('/');
+                                const vIdx = parseInt(segs[0], 10) - 1;
+                                const vtIdx = segs[1] ? parseInt(segs[1], 10) - 1 : -1;
+
+                                if (!isNaN(vIdx) && vIdx >= 0) vIndices.push(vIdx);
+                                if (!isNaN(vtIdx) && vtIdx >= 0) vtIndices.push(vtIdx);
+                            }
+
+                            for (let j = 1; j < vIndices.length - 1; j++) {
+                                const i0 = vIndices[0], i1 = vIndices[j], i2 = vIndices[j + 1];
+
+                                if (i0 * 3 + 2 < rawPositions.length && i1 * 3 + 2 < rawPositions.length && i2 * 3 + 2 < rawPositions.length) {
+                                    targetGroup.positions.push(
+                                        rawPositions[i0 * 3], rawPositions[i0 * 3 + 1], rawPositions[i0 * 3 + 2],
+                                        rawPositions[i1 * 3], rawPositions[i1 * 3 + 1], rawPositions[i1 * 3 + 2],
+                                        rawPositions[i2 * 3], rawPositions[i2 * 3 + 1], rawPositions[i2 * 3 + 2]
+                                    );
+
+                                    if (vtIndices.length >= vIndices.length) {
+                                        const u0 = vtIndices[0], u1 = vtIndices[j], u2 = vtIndices[j + 1];
+                                        targetGroup.uvs.push(
+                                            rawUVs[u0 * 2], rawUVs[u0 * 2 + 1],
+                                            rawUVs[u1 * 2], rawUVs[u1 * 2 + 1],
+                                            rawUVs[u2 * 2], rawUVs[u2 * 2 + 1]
+                                        );
+                                    }
+                                }
+                            }
+
+                            // Svuota in streaming appena si raggiunge la soglia di vertici
+                            if (targetGroup.positions.length >= MAX_CHUNK_VERTICES) {
+                                flushGroup(currentMaterial);
+                            }
+                        }
                     }
-                }
-                self.postMessage({ action: 'NEXT_CHUNK' });
-            } 
-            else if (data.action === 'FINISH') {
-                const cx = (minX + maxX) / 2.0;
-                const cy = (minY + maxY) / 2.0;
-                const cz = (minZ + maxZ) / 2.0;
-
-                const resultGroups = {};
-                const transferables = [];
-
-                for (const mtlName in meshGroups) {
-                    const group = meshGroups[mtlName];
-                    if (group.positions.length === 0) continue;
-
-                    const posArray = new Float32Array(group.positions.length);
-                    for (let i = 0; i < group.positions.length; i += 3) {
-                        posArray[i]     = group.positions[i] - cx;
-                        posArray[i + 1] = group.positions[i + 1] - cy;
-                        posArray[i + 2] = group.positions[i + 2] - cz;
+                    self.postMessage({ action: 'NEXT_CHUNK' });
+                } 
+                else if (data.action === 'FINISH') {
+                    // Invia eventuali residui rimanenti nei gruppi
+                    for (const mtlName in meshGroups) {
+                        flushGroup(mtlName);
                     }
 
-                    const uvArray = group.uvs.length > 0 ? new Float32Array(group.uvs) : null;
-                    transferables.push(posArray.buffer);
-                    if (uvArray) transferables.push(uvArray.buffer);
+                    const cx = (minX + maxX) / 2.0;
+                    const cy = (minY + maxY) / 2.0;
+                    const cz = (minZ + maxZ) / 2.0;
 
-                    resultGroups[mtlName] = {
-                        positions: posArray.buffer,
-                        uvs: uvArray ? uvArray.buffer : null
-                    };
+                    // Libera i buffer grezzi
+                    rawPositions = [];
+                    rawUVs = [];
+
+                    self.postMessage({
+                        action: 'COMPLETE',
+                        center: [cx, cy, cz],
+                        detectedCRS: detectedCRS
+                    });
                 }
-
-                self.postMessage({
-                    action: 'COMPLETE',
-                    groups: resultGroups,
-                    center: [cx, cy, cz],
-                    detectedCRS: detectedCRS
-                }, transferables);
-            }
-        };
-    `;
+            };
+        `;
 
     const blob = new Blob([workerCode], { type: 'application/javascript' });
     const workerUrl = URL.createObjectURL(blob);
     const worker = new Worker(workerUrl);
 
     if (typeof showLoadingProgress === 'function') showLoadingProgress(0);
+    const parentGroup = new THREE.Group();
 
-    worker.onmessage = async function (e) {
-        const data = e.data;
+        worker.onmessage = async function (e) {
+            const data = e.data;
 
-        if (data.action === 'NEXT_CHUNK') {
-            const progress = Math.min(100, Math.round((offset / fileSize) * 100));
-            if (typeof showLoadingProgress === 'function') showLoadingProgress(progress);
-            readNextChunk(mainFile, worker);
-        }
-        else if (data.action === 'COMPLETE') {
-            URL.revokeObjectURL(workerUrl);
-            if (typeof hideLoadingProgress === 'function') hideLoadingProgress();
-
-            const center = data.center;
-
-            if (data.detectedCRS && typeof populateCRSDropdown === 'function') {
-                populateCRSDropdown(data.detectedCRS);
-            } else if (typeof populateCRSDropdown === 'function') {
-                populateCRSDropdown(estimateCRSFromCoords(center[0], center[1]));
+            if (data.action === 'NEXT_CHUNK') {
+                const progress = Math.min(100, Math.round((offset / fileSize) * 100));
+                if (typeof showLoadingProgress === 'function') showLoadingProgress(progress);
+                readNextChunk(mainFile, worker);
             }
+            else if (data.action === 'PARTIAL_MESH') {
+                // Riceve la sub-mesh in tempo reale dal Worker
+                const positions = new Float32Array(data.positions);
+                const uvs = data.uvs ? new Float32Array(data.uvs) : null;
 
-            const meshGroup = buildThreeMeshGroupFromPositions(data.groups, materialsMap, defaultMaterial);
-            await onModelLoaded(meshGroup, { x: center[0], y: center[1], z: center[2] });
+                const geometry = new THREE.BufferGeometry();
+                geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                if (uvs) {
+                    geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+                }
 
-            worker.terminate();
-        }
-        else if (data.action === 'ERROR') {
-            URL.revokeObjectURL(workerUrl);
-            alert("Errore caricamento OBJ: " + data.message);
-            if (typeof hideLoadingProgress === 'function') hideLoadingProgress();
-            worker.terminate();
-        }
-    };
+                geometry.computeVertexNormals();
+
+                const material = materialsMap[data.mtlName] || defaultMaterial;
+                const mesh = new THREE.Mesh(geometry, material);
+                parentGroup.add(mesh);
+            }
+            else if (data.action === 'COMPLETE') {
+                URL.revokeObjectURL(workerUrl);
+                if (typeof hideLoadingProgress === 'function') hideLoadingProgress();
+
+                const center = data.center;
+
+                if (data.detectedCRS && typeof populateCRSDropdown === 'function') {
+                    populateCRSDropdown(data.detectedCRS);
+                } else if (typeof populateCRSDropdown === 'function') {
+                    populateCRSDropdown(estimateCRSFromCoords(center[0], center[1]));
+                }
+
+                // Trasla l'intero gruppo sul centro calcolato dal Worker
+                parentGroup.children.forEach(child => {
+                    if (child.isMesh && child.geometry) {
+                        child.geometry.translate(-center[0], -center[1], -center[2]);
+                    }
+                });
+
+                await onModelLoaded(parentGroup, { x: center[0], y: center[1], z: center[2] });
+                worker.terminate();
+            }
+            else if (data.action === 'ERROR') {
+                URL.revokeObjectURL(workerUrl);
+                alert("OBJ loading error: " + data.message);
+                if (typeof hideLoadingProgress === 'function') hideLoadingProgress();
+                worker.terminate();
+            }
+        };
 
     worker.onerror = function (err) {
         URL.revokeObjectURL(workerUrl);
-        console.error("Errore Worker OBJ:", err);
-        alert("Errore durante il parsing del file OBJ.");
+        console.error("OBJ Worker error:", err);
+        alert("Error parsing OBJ file.");
         if (typeof hideLoadingProgress === 'function') hideLoadingProgress();
         worker.terminate();
     };
@@ -1150,20 +1188,30 @@ function toggleDigitizeModeUI() {
 
     const sensorUI = document.getElementById('sensor-ui');
     const polyUI = document.getElementById('polyline-metrics-ui');
+
     if (mode === 'spot_point') {
         if (sensorUI) sensorUI.style.display = 'block';
         if (polyUI) polyUI.style.display = 'none';
-    } else if (mode === 'note') {
-        if (polyUI) polyUI.style.display = 'none';
-    } else {
+    } else if (mode === 'polyline' || mode === 'simple_polyline') {
         if (sensorUI) sensorUI.style.display = 'none';
         if (polyUI) polyUI.style.display = 'block';
+    } else {
+        // Modalità 'note' e 'draped_polygon': nasconde sia sensori che metriche polilinea
+        if (sensorUI) sensorUI.style.display = 'none';
+        if (polyUI) polyUI.style.display = 'none';
     }
 
     const startBtn = document.getElementById('btn-toggle-digitize');
-    if (startBtn) startBtn.textContent = (mode === 'note') ? '▶ Place Note' : '▶ Start Digitizing';
+    if (startBtn) {
+        if (mode === 'note') {
+            startBtn.textContent = '▶ Place Note';
+        } else if (mode === 'draped_polygon') {
+            startBtn.textContent = '▶ Draw Polygon';
+        } else {
+            startBtn.textContent = '▶ Start Digitizing';
+        }
+    }
 }
-
 function updateGeometryFields() {
     const geometry = document.getElementById('input-geometry').value;
     
@@ -1278,7 +1326,7 @@ async function loadModelFromSketchfab(pageUrl, apiToken) {
 
     const statusElem = document.getElementById('status');
     if (statusElem) {
-        statusElem.textContent = "Connessione a Sketchfab...";
+        statusElem.textContent = "Connecting to Sketchfab...";
         statusElem.style.color = '#e0a800';
     }
 
@@ -1289,8 +1337,8 @@ async function loadModelFromSketchfab(pageUrl, apiToken) {
         });
 
         if (!response.ok) {
-            if (response.status === 401) throw new Error("API Token non valido o modello protetto.");
-            if (response.status === 404) throw new Error("Modello non trovato o scaricabile.");
+            if (response.status === 401) throw new Error("Invalid API Token or protected model.");
+            if (response.status === 404) throw new Error("Model not found or downloadable.");
             throw new Error(`Errore API (${response.status})`);
         }
 
@@ -1298,16 +1346,16 @@ async function loadModelFromSketchfab(pageUrl, apiToken) {
         const downloadUrl = data.glb ? data.glb.url : (data.gltf ? data.gltf.url : null);
 
         if (!downloadUrl) {
-            throw new Error("Nessun file GLB/GLTF scaricabile trovato per questo modello.");
+            throw new Error("No downloadable GLB/GLTF file found for this model.");
         }
 
-        if (statusElem) statusElem.textContent = "Download modello...";
+        if (statusElem) statusElem.textContent = "Downloading model...";
 
         const fileResponse = await fetch(downloadUrl);
         const blob = await fileResponse.blob();
 
         if (downloadUrl.includes('.zip') || blob.type.includes('zip')) {
-            if (statusElem) statusElem.textContent = "Decompressione ZIP...";
+            if (statusElem) statusElem.textContent = "Decompressing ZIP...";
             
             const zip = await JSZip.loadAsync(blob);
             const files = {};
@@ -1321,7 +1369,7 @@ async function loadModelFromSketchfab(pageUrl, apiToken) {
             }
 
             const gltfFilename = Object.keys(files).find(name => name.endsWith('.gltf'));
-            if (!gltfFilename) throw new Error("Nessun file .gltf trovato nell'archivio ZIP.");
+            if (!gltfFilename) throw new Error("No .gltf file found in the ZIP archive.");
 
             const manager = new THREE.LoadingManager();
             manager.setURLModifier((url) => {
@@ -1372,10 +1420,10 @@ async function loadModelFromSketchfab(pageUrl, apiToken) {
         }
 
     } catch (err) {
-        console.error("Errore Sketchfab Import:", err);
-        alert(`Impossibile importare da Sketchfab: ${err.message}`);
+        console.error("Sketchfab Import error:", err);
+        alert(`Unable to import from Sketchfab: ${err.message}`);
         if (statusElem) {
-            statusElem.textContent = "Errore Sketchfab";
+            statusElem.textContent = "Sketchfab Error";
             statusElem.style.color = '#ff4444';
         }
     }

@@ -65,10 +65,10 @@ async function requestSensorPermissions() {
             if (response === 'granted') {
                 window.addEventListener('deviceorientation', handleDeviceOrientation, true);
             } else {
-                alert("⚠️ Permesso sensori giroscopio negato.");
+                alert("⚠️ Gyroscope sensors permission denied.");
             }
         } catch (e) {
-            console.error("Errore sensori:", e);
+            console.error("Sensors error:", e);
         }
     } else {
         window.addEventListener('deviceorientation', handleDeviceOrientation, true);
@@ -146,7 +146,7 @@ function stopARTracking() {
     }
     stopCameraStream();
     if (window.controls) window.controls.enabled = true;
-    console.log("⏸️ Tracciamento AR disattivato.");
+    console.log("⏸️ AR Tracking disabled.");
 }
 
 // ==========================================
@@ -216,8 +216,8 @@ async function openCameraOverlay() {
             overlayVideo.srcObject = mediaStream;
             await overlayVideo.play();
         } catch (fErr) {
-            console.error("❌ Errore fotocamera:", fErr);
-            alert("Impossibile accedere alla fotocamera.");
+            console.error("❌ Camera Error:", fErr);
+            alert("Unable to access camera.");
             closeCameraOverlay();
         }
     }
@@ -256,7 +256,7 @@ async function startCalibration() {
     showCalibrationUI();
 
     setOverlayMode('SELECT_3D_MODEL');
-    updateCalibrationUI(`Punto 1/${TOTAL_POINTS}: Clicca sul punto nel MODELLO 3D (Ritratto, Z=Alto)`);
+    updateCalibrationUI(`Point 1/${TOTAL_POINTS}: Point 1/5: Click on the point in the 3D MODEL (Portrait, Z=Up)`);
 }
 
 function handleModelClick(e) {
@@ -303,7 +303,7 @@ function handleModelClick(e) {
 
         waitingForScreenPoint = true;
         setOverlayMode('SELECT_CAMERA_POINT');
-        updateCalibrationUI(`Punto ${calibrationStep + 1}/${TOTAL_POINTS}: Clicca sulla FOTOCAMERA (80% Foto / 20% Modello)`);
+        updateCalibrationUI(`Point ${calibrationStep + 1}/${TOTAL_POINTS}: Point X/5: Click on the CAMERA (80% Camera / 20% Model)`);
     }
 }
 
@@ -330,7 +330,7 @@ function handleCameraOverlayClick(e) {
         completeCalibration();
     } else {
         setOverlayMode('SELECT_3D_MODEL');
-        updateCalibrationUI(`Punto ${calibrationStep + 1}/${TOTAL_POINTS}: Clicca sul prossimo punto nel MODELLO 3D`);
+        updateCalibrationUI(`Point ${calibrationStep + 1}/${TOTAL_POINTS}: Click on the next point in the 3D MODEL`);
     }
 }
 
@@ -456,14 +456,14 @@ function completeCalibration() {
             setOverlayMode('AR_TRACKING');
             startARTrackingLoop();
 
-            console.log(`📍 Posizione Ancorata (Z=Alto):`, baseCameraPosition);
-            console.log(`📐 FOV Calibrato: ${result.fov}°`);
+            console.log(`📍 Position anchored (Z=Ip):`, baseCameraPosition);
+            console.log(`📐 FOV Calibrated: ${result.fov}°`);
         }
     }
 
     hideCalibrationUI();
     clearMarkers();
-    alert("✅ Calibrazione completata!\nTracciamento AR in tempo reale attivo. Fotocamera visibile al 30%.");
+    alert("✅ Calibration completed!\nReal-time AR tracking active. Camera visible at 30%.");
 }
 
 function cancelCalibration() {
@@ -546,13 +546,13 @@ function updateCalibrationUI(message) {
     if (!ui) return;
 
     ui.innerHTML = `
-        <div style="margin-bottom: 6px; color: #60a5fa; font-weight: bold; font-size: 15px;">📷 CALIBRAZIONE AR (5 PUNTI)</div>
+        <div style="margin-bottom: 6px; color: #60a5fa; font-weight: bold; font-size: 15px;">📷 Calibration AR (5 Points)</div>
         <div style="margin-bottom: 8px; font-size: 13px; color: #e2e8f0;">${message}</div>
-        <div style="font-size: 11px; color: #94a3b8; margin-bottom: 12px;">Progresso: ${calibrationStep}/${TOTAL_POINTS} punti</div>
+        <div style="font-size: 11px; color: #94a3b8; margin-bottom: 12px;">Progress: ${calibrationStep}/${TOTAL_POINTS} punti</div>
         <button onclick="cancelCalibration()" style="
             background: #ef4444; color: white; border: none; padding: 6px 14px;
             border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold;
-        ">Annulla</button>
+        ">Cancel</button>
     `;
 }
 

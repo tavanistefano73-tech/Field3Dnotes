@@ -1,3 +1,32 @@
+function clearAllDigitizedFeatures() {
+    // 1. Annulla qualsiasi operazione di disegno attiva e rimuovi le anteprime temporanee
+    if (typeof cancelCurrentDigitizing === 'function') cancelCurrentDigitizing();
+
+    // 2. Rimuovi tutti i gruppi 3D salvati dalla scena ed effettua il dispose delle risorse
+    if (Array.isArray(window.digitizedFeatures)) {
+        digitizedFeatures.forEach(f => {
+            if (f.group) {
+                scene.remove(f.group); // Rimuove l'oggetto dalla scena Three.js
+                if (typeof safeDispose === 'function') safeDispose(f.group); // Libera la memoria GPU
+            }
+        });
+        digitizedFeatures.length = 0;
+        selectedFeatureId = null;
+        digitizedFeatures.length = 0;
+    }
+
+    // 3. Resetta contatori e selezioni
+    if (typeof selectedFeatureId !== 'undefined') selectedFeatureId = null;
+    featureCounter = 1;
+
+    // 4. Deseleziona eventuali oggetti attivi e chiudi i popup
+    if (typeof deselectFeature === 'function') deselectFeature();
+
+    // 5. Aggiorna l'interfaccia utente
+    if (typeof updateVisibilityFiltersUI === 'function') updateVisibilityFiltersUI();
+    if (typeof updateUI === 'function') updateUI();
+}
+
 // ==================== GEOJSON I/O (PURE RAM VERSION) ====================
 
 function buildGeoJSONObject() {
@@ -8,10 +37,11 @@ function buildGeoJSONObject() {
             feature_id: f.id,
             f_type: f.f_type || '',
             unit: f.unit || '',
-            set: f.set || ''
+            set: f.set || '',
+            color: f.color || ''
         };
 
-        // 1. NOTES MANAGEMENT (Unchanged)
+        // 1. NOTES MANAGEMENT
         if (f.is_note) {
             const noteProps = {
                 ...propsBase,
@@ -41,7 +71,7 @@ function buildGeoJSONObject() {
             continue;
         }
 
-        // 2. MANUAL SPOT ORIENTATION MANAGEMENT (Unchanged)
+        // 2. MANUAL SPOT ORIENTATION MANAGEMENT
         if (f.is_manual_spot) {
             const props = {
                 ...propsBase,
@@ -73,28 +103,70 @@ function buildGeoJSONObject() {
             continue;
         }
 
-        // 3. ➕ NEW MANAGEMENT: SIMPLE POLYLINE (Without PCA or centroid point)
+        // Estrazione centralizzata delle coordinate per tutti i tipi di linea/poligono
+        const lineGis = f.line || f.lineGis || f.points || f.polyline || f.coordinates || [];
+
+        // 3. SIMPLE POLYLINE
         if (f.is_simple_polyline) {
-            geojsonFeatures.push({
-                type: "Feature",
-                geometry: { type: "LineString", coordinates: f.line || [] },
-                properties: {
-                    ...propsBase,
-                    layer_type: "simple_polyline",
-                    ...(f.custom_fields || {})
-                }
-            });
-            continue; // Skip the rest of the loop for this feature
+            if (lineGis.length >= 2) {
+                geojsonFeatures.push({
+                    type: "Feature",
+                    geometry: { type: "LineString", coordinates: lineGis },
+                    properties: {
+                        ...propsBase,
+                        layer_type: "simple_polyline",
+                        is_simple_polyline: true,
+                        ...(f.custom_fields || {})
+                    }
+                });
+            }
+            continue;
         }
 
-        // 4. STANDARD POLYLINE / 3D PLANE MANAGEMENT (Unchanged)
-        const lineGis = f.line || [];
+        // 4. DRAPED POLYGON
+                if (f.is_draped_polygon) {
+                    const polyCoords = f.polygon || f.polyGis || lineGis;
+                    if (polyCoords.length >= 3) {
+                        // Recupera il view_context congelato al momento della digitalizzazione o rileva lo stato attuale
+                        const viewCtx = f.view_context || {
+                            camera_position: typeof camera !== 'undefined' ? [camera.position.x, camera.position.y, camera.position.z] : null,
+                            camera_rotation: typeof camera !== 'undefined' ? [camera.rotation.x, camera.rotation.y, camera.rotation.z] : null,
+                            camera_fov: typeof camera !== 'undefined' ? camera.fov : null,
+                            clipping_planes: (typeof renderer !== 'undefined' && renderer.clippingPlanes) ?
+                                renderer.clippingPlanes.map(p => ({ normal: [p.normal.x, p.normal.y, p.normal.z], constant: p.constant })) : []
+                        };
 
+                        geojsonFeatures.push({
+                            type: "Feature",
+                            geometry: {
+                                type: "Polygon",
+                                coordinates: [polyCoords]
+                            },
+                            properties: {
+                                ...propsBase,
+                                layer_type: "draped_polygon",
+                                is_draped_polygon: true,
+                                view_context: viewCtx,
+                                ...(f.custom_fields || {})
+                            }
+                        });
+                    }
+                    continue;
+                }
+
+        // 5. STANDARD POLYLINE / 3D PLANE MANAGEMENT (BEST FIT)
         if (lineGis.length >= 2) {
-            const pca = lineGis.length >= 3
-                ? calculatePCAAndOrientationJS(lineGis)
-                : { valMin: 0, valMed: 0, valMax: 0, strike: 0, dipDir: 0, dip: 0 };
+            let pca = { valMin: 0, valMed: 0, valMax: 0, strike: 0, dipDir: 0, dip: 0 };
 
+            if (lineGis.length >= 3 && typeof calculatePCAAndOrientationJS === 'function') {
+                try {
+                    pca = calculatePCAAndOrientationJS(lineGis);
+                } catch (err) {
+                    console.warn(`PCA calculation error for feature ${f.id}:`, err);
+                }
+            }
+
+            // Scrittura della polilinea Best Fit
             geojsonFeatures.push({
                 type: "Feature",
                 geometry: { type: "LineString", coordinates: lineGis },
@@ -106,26 +178,27 @@ function buildGeoJSONObject() {
                     ...(f.custom_fields || {})
                 }
             });
-        }
 
-        if (lineGis.length >= 3) {
-            let cx = 0, cy = 0, cz = 0;
-            lineGis.forEach(p => { cx += p[0]; cy += p[1]; cz += p[2]; });
-            cx /= lineGis.length; cy /= lineGis.length; cz /= lineGis.length;
+            // Scrittura del punto centroide Best Fit
+            if (lineGis.length >= 3) {
+                let cx = 0, cy = 0, cz = 0;
+                lineGis.forEach(p => { cx += p[0]; cy += p[1]; cz += p[2]; });
+                cx /= lineGis.length; cy /= lineGis.length; cz /= lineGis.length;
 
-            const pca = calculatePCAAndOrientationJS(lineGis);
-
-            geojsonFeatures.push({
-                type: "Feature",
-                geometry: { type: "Point", coordinates: [cx, cy, cz] },
-                properties: {
-                    ...propsBase,
-                    layer_type: "orientation",
-                    val_min: pca.valMin, val_med: pca.valMed, val_max: pca.valMax,
-                    strike: pca.strike, dip_dir: pca.dipDir, dip: pca.dip,
-                    ...(f.custom_fields || {})
-                }
-            });
+                geojsonFeatures.push({
+                    type: "Feature",
+                    geometry: { type: "Point", coordinates: [cx, cy, cz] },
+                    properties: {
+                        ...propsBase,
+                        feature_id: `${f.id}_centroid`,
+                        parent_feature_id: f.id,
+                        layer_type: "orientation_centroid",
+                        val_min: pca.valMin, val_med: pca.valMed, val_max: pca.valMax,
+                        strike: pca.strike, dip_dir: pca.dipDir, dip: pca.dip,
+                        ...(f.custom_fields || {})
+                    }
+                });
+            }
         }
     }
 
@@ -222,8 +295,18 @@ function loadGeoJSONFile(files) {
                     if (typeof onCRSChanged === 'function') onCRSChanged();
                 }
             }
-            digitizedFeatures.forEach(f => { if (f.group) safeDispose(f.group); });
-            digitizedFeatures.length = 0; selectedFeatureId = null;
+
+            // PULIZIA COMPLETA E CORRETTA DELLA SCENA 3D PRE-CARICAMENTO
+            if (Array.isArray(window.digitizedFeatures)) {
+                digitizedFeatures.forEach(f => {
+                    if (f.group) {
+                        scene.remove(f.group); // Rimuove visivamente l'oggetto dalla scena Three.js
+                        if (typeof safeDispose === 'function') safeDispose(f.group); // Libera la GPU
+                    }
+                });
+                digitizedFeatures.length = 0;
+                selectedFeatureId = null;
+            }
 
             function gisToThree(ptGis) {
                 return new THREE.Vector3(
@@ -234,7 +317,7 @@ function loadGeoJSONFile(files) {
             }
             let notesLoadedCount = 0;
 
-            // 1. LOADING NOTES (Unchanged)
+            // 1. LOADING NOTES
             geojson.features.forEach(feat => {
                 const props = feat.properties || {};
                 if (props.layer_type !== 'note' || !feat.geometry || feat.geometry.type !== 'Point') return;
@@ -270,13 +353,14 @@ function loadGeoJSONFile(files) {
                 'feature_id', 'id', 'f_type', 'type', 'unit', 'set', 'layer_type',
                 'note_type', 'text', 'photo_file', 'photo_data', 'sketch_file', 'sketch_data',
                 'audio_file', 'audio_data', 'geometry_type', 'trend', 'plunge', 'strike',
-                'dip_dir', 'dip', 'rake', 'sense', 'n_nodes', 'val_min', 'val_med', 'val_max'
+                'dip_dir', 'dip', 'rake', 'sense', 'n_nodes', 'val_min', 'val_med', 'val_max',
+                'is_draped_polygon', 'is_simple_polyline', 'view_context'
             ];
 
             const featsMap = {};
             geojson.features.forEach(feat => {
                 const props = feat.properties || {};
-                if (props.layer_type === 'note') return;
+                if (props.layer_type === 'note' || props.layer_type === 'orientation_centroid') return;
 
                 const fid = props.feature_id || props.id || featureCounter;
                 const customFields = {};
@@ -284,12 +368,16 @@ function loadGeoJSONFile(files) {
                     if (!knownSystemKeys.includes(k)) customFields[k] = props[k];
                 });
 
+                const isDraped = (props.layer_type === 'draped_polygon') || !!props.is_draped_polygon;
+                const isSimple = (props.layer_type === 'simple_polyline') || !!props.is_simple_polyline;
+
                 if (!featsMap[fid]) {
                     let calcDipDir = props.dip_dir || 0;
                     let calcStrike = props.strike !== undefined ? props.strike : Math.round((calcDipDir - 90 + 360) % 360);
 
                     featsMap[fid] = {
                         id: fid, f_type: props.f_type || '', unit: props.unit || '', set: props.set || '',
+                        color: props.color || '#00e676',
                         lineGis: null, polyGis: null, spotPointGis: null,
                         strike: calcStrike, dip_dir: calcDipDir, dip: props.dip || 0,
                         trend: props.trend || 0, plunge: props.plunge || 0,
@@ -297,15 +385,16 @@ function loadGeoJSONFile(files) {
                         sense: props.sense || 'NA',
                         geometry_type: props.geometry_type || 'plane',
                         is_manual_spot: (props.layer_type === 'manual_orientation'),
-                        is_simple_polyline: (props.layer_type === 'simple_polyline'), // ➕ READ THE TYPE
+                        is_simple_polyline: isSimple,
+                        is_draped_polygon: isDraped,
+                        view_context: props.view_context || null,
                         custom_fields: customFields
                     };
                 } else {
                     featsMap[fid].custom_fields = { ...featsMap[fid].custom_fields, ...customFields };
-                    // If one of the features associated with the same ID declares simple_polyline, keep it
-                    if (props.layer_type === 'simple_polyline') {
-                        featsMap[fid].is_simple_polyline = true;
-                    }
+                    if (isSimple) featsMap[fid].is_simple_polyline = true;
+                    if (isDraped) featsMap[fid].is_draped_polygon = true;
+                    if (props.view_context) featsMap[fid].view_context = props.view_context;
                 }
 
                 if (feat.geometry.type === 'Point' && props.layer_type === 'manual_orientation') {
@@ -313,12 +402,16 @@ function loadGeoJSONFile(files) {
                     featsMap[fid].is_manual_spot = true;
                 } else if (feat.geometry.type === 'LineString') {
                     featsMap[fid].lineGis = feat.geometry.coordinates;
+                } else if (feat.geometry.type === 'Polygon') {
+                    // Estragga l'anello esterno dal Polygon GeoJSON
+                    featsMap[fid].polyGis = feat.geometry.coordinates[0];
+                    featsMap[fid].is_draped_polygon = true;
                 }
             });
             
             let loadedCount = 0;
             Object.values(featsMap).forEach(item => {
-                // 2. RECONSTRUCTING SPOT ORIENTATION (Unchanged)
+                // 2. RECONSTRUCTING SPOT ORIENTATION
                 if (item.is_manual_spot && item.spotPointGis) {
                     const ptThree = gisToThree(item.spotPointGis);
 
@@ -362,12 +455,74 @@ function loadGeoJSONFile(files) {
                     if (item.id >= featureCounter) featureCounter = item.id + 1;
                     loadedCount++;
                 }
-                // 3. RECONSTRUCTING LINESTRING (Modified only the polyPts calculation)
+                // 3. RECONSTRUCTING DRAPED POLYGON
+                else if (item.is_draped_polygon && (item.polyGis || item.lineGis)) {
+                    const coords = item.polyGis || item.lineGis;
+                    const ptsThree = coords.map(gisToThree);
+
+                    let polyGroup = null;
+
+                    // 1. Creazione fotocamera virtuale con le coordinate esatte salvate nel JSON
+                    let projCam = camera;
+                    if (item.view_context && item.view_context.camera_position) {
+                        projCam = new THREE.PerspectiveCamera(
+                            item.view_context.camera_fov || camera.fov,
+                            camera.aspect,
+                            camera.near,
+                            camera.far
+                        );
+                        projCam.position.set(...item.view_context.camera_position);
+                        if (item.view_context.camera_rotation) {
+                            projCam.rotation.set(...item.view_context.camera_rotation);
+                        }
+                        projCam.updateMatrixWorld(true);
+                    }
+
+                    // 2. Proiezione del perimetro usando la camera salvata
+                    if (typeof createColoredDrapedMesh === 'function' && typeof resamplePathOnMesh === 'function' && typeof loadedMesh !== 'undefined') {
+                        const closedPoints = [...ptsThree, ptsThree[0].clone()];
+                        const planeBasis = typeof getPolygonPlaneBasis === 'function' ? getPolygonPlaneBasis(closedPoints) : { normal: new THREE.Vector3(0, 1, 0) };
+                        
+                        // Genera i vertici 3D ricalcolando il raycast con la fotocamera del contesto originale
+                        const resampled3D = resamplePathOnMesh(closedPoints, loadedMesh, planeBasis, 10, projCam);
+                        const colorHex = parseInt((item.color || '#00e676').replace('#', ''), 16);
+                        polyGroup = createColoredDrapedMesh(resampled3D, closedPoints, loadedMesh, colorHex);
+                    } else if (typeof createDrapedPolygonGroup === 'function') {
+                        polyGroup = createDrapedPolygonGroup(ptsThree);
+                    } else if (typeof createFeatureGroup === 'function') {
+                        polyGroup = createFeatureGroup(ptsThree, ptsThree);
+                    }
+
+                    if (polyGroup) {
+                        polyGroup.userData = { featureId: item.id };
+                        polyGroup.traverse(c => c.userData = { featureId: item.id });
+                        scene.add(polyGroup);
+                    }
+
+                    digitizedFeatures.push({
+                        id: item.id,
+                        is_manual_spot: false,
+                        is_draped_polygon: true,
+                        is_simple_polyline: false,
+                        color: item.color || '#00e676',
+                        f_type: item.f_type,
+                        unit: item.unit,
+                        set: item.set,
+                        view_context: item.view_context,
+                        custom_fields: item.custom_fields || {},
+                        polygon: coords,
+                        line: coords,
+                        group: polyGroup
+                    });
+
+                    if (item.id >= featureCounter) featureCounter = item.id + 1;
+                    loadedCount++;
+                }
+                // 4. RECONSTRUCTING LINESTRING
                 else if (item.lineGis && item.lineGis.length > 0) {
                     const linePts = item.lineGis.map(gisToThree);
                     
                     let polyPts = null;
-                    // ➕ Generate plane surface ONLY if NOT a simple polyline
                     if (!item.is_simple_polyline && linePts.length >= 3) {
                         polyPts = calculatePlaneCornersForPoints(linePts);
                     }
@@ -380,7 +535,8 @@ function loadGeoJSONFile(files) {
                     digitizedFeatures.push({
                         id: item.id,
                         is_manual_spot: false,
-                        is_simple_polyline: !!item.is_simple_polyline, // ➕ Save flag in RAM
+                        is_simple_polyline: !!item.is_simple_polyline,
+                        is_draped_polygon: false,
                         f_type: item.f_type,
                         unit: item.unit,
                         set: item.set,

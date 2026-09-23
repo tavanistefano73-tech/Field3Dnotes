@@ -23,8 +23,38 @@ let isFollowModeActive = false;
 let latestNativeGPS = null;
 
 // Offset di elevazione manuale in metri (-100m a +100m)
-window.gpsAltitudeOffset = 0;
+window.gpsAltitudeOffset = 0.0;
 
+window.updateGpsAltitudeOffset = function(val) {
+    let numVal = parseFloat(val);
+    if (isNaN(numVal)) numVal = 0.0;
+
+    // Vincola il valore tra -100 e +100
+    numVal = Math.max(-100, Math.min(100, numVal));
+
+    window.gpsAltitudeOffset = numVal;
+
+    // 1. Sincronizza lo Slider se la modifica proviene dall'input di testo
+    const slider = document.getElementById('input-alt-slider');
+    if (slider && parseFloat(slider.value) !== numVal) {
+        slider.value = numVal;
+    }
+
+    // 2. Sincronizza il box di testo se la modifica proviene dallo slider
+    const input = document.getElementById('alt-offset-input');
+    if (input && document.activeElement !== input) {
+        input.value = numVal.toFixed(1);
+    }
+
+    // 3. Forza l'aggiornamento della posizione 3D se ci sono coordinate salvate
+    if (window.latestNativeGPS && typeof window.updateImHerePosition === 'function') {
+        window.updateImHerePosition(
+            window.latestNativeGPS.lat,
+            window.latestNativeGPS.lon,
+            window.latestNativeGPS.alt
+        );
+    }
+};
 // Target e Posizione correnti per l'interpolazione fluida (LERP)
 const targetCamPos = new THREE.Vector3();
 const targetLookAt = new THREE.Vector3();
@@ -51,10 +81,19 @@ window.handleNativeHeading = function(heading) {
     }
 };
 
-// ==========================================
-// RECEIVE NATIVE GPS FROM SWIFT
-// ==========================================
-window.handleNativeLocation = function(lat, lon, alt) {
+window.handleNativeLocation = function(lat, lon, alt, accuracy, source) {
+    // ✅ Leggi il 5° parametro (source)
+    const receivedSource = source || 'internal';
+    
+    // ✅ Prendi la sorgente selezionata da localStorage
+    const selectedSource = localStorage.getItem('gpsSource') || 'internal';
+    
+    // ✅ SCARTA le coordinate se la sorgente non corrisponde
+    if (receivedSource !== selectedSource) {
+        console.log(`🚫 Discarded coordinates from '${receivedSource}' because retrieved '${selectedSource}'`);
+        return;
+    }
+    
     latestNativeGPS = {
         lat: parseFloat(lat),
         lon: parseFloat(lon),
@@ -70,25 +109,7 @@ window.handleNativeLocation = function(lat, lon, alt) {
         }
         
         updateImHerePosition(latestNativeGPS.lat, latestNativeGPS.lon, latestNativeGPS.alt);
-    }
-};
-
-/**
- * Aggiorna l'offset dell'altezza dallo slider manuale (-100m a +100m)
- */
-window.updateGpsAltitudeOffset = function(val) {
-    const parsed = parseFloat(val);
-    window.gpsAltitudeOffset = isNaN(parsed) ? 0 : parsed;
-    
-    // Aggiorna la label testuale se presente
-    const label = document.getElementById('alt-offset-val');
-    if (label) {
-        label.textContent = (window.gpsAltitudeOffset > 0 ? "+" : "") + window.gpsAltitudeOffset.toFixed(1) + "m";
-    }
-
-    // Aggiorna subito la posizione se il GPS è attivo
-    if (isGpsActive && latestNativeGPS) {
-        updateImHerePosition(latestNativeGPS.lat, latestNativeGPS.lon, latestNativeGPS.alt);
+        console.log(`✅ Coordinates updated '${receivedSource}': ${latestNativeGPS.lat.toFixed(6)}, ${latestNativeGPS.lon.toFixed(6)}`);
     }
 };
 
@@ -221,6 +242,7 @@ function toggleGPS() {
             scene.remove(imHereMarker);
             imHereMarker = null;
         }
+        
         if (btn) {
             btn.classList.remove('pressed');
             btn.textContent = "📍 Show Me";
@@ -478,3 +500,175 @@ function renderHighVisMarker(position) {
 
 window.toggleGPS = toggleGPS;
 window.centerOnLocation = centerOnLocation;
+
+
+/**
+ * Registra un punto di misura o una nota direttamente nelle coordinate GPS attive,
+ * ereditando attributi, modalita e geometria dal modulo Digitize.
+ */
+function captureAtGNSSPosition(event) {
+    if (event) event.stopPropagation();
+
+    // 1. Lettura diretta della posizione GPS gestita da imhere.js
+    if (!latestNativeGPS || latestNativeGPS.lat === undefined || latestNativeGPS.lon === undefined) {
+        alert("⚠️ GNSS signal not available yet.");
+        return;
+    }
+
+    const lat = latestNativeGPS.lat;
+    const lon = latestNativeGPS.lon;
+    const alt = latestNativeGPS.alt || 0;
+
+    // 2. Calcolo coordinate GIS reali (UTM/CRS + Offset Quota Manuale)
+    let targetCRS = "EPSG:32633";
+    const crsInput = document.getElementById('input-crs');
+    if (crsInput && crsInput.value.trim()) {
+        targetCRS = crsInput.value.trim();
+    }
+    if (!targetCRS.toUpperCase().startsWith("EPSG:") && !targetCRS.startsWith("+proj")) {
+        targetCRS = "EPSG:" + targetCRS;
+    }
+
+    let realX = lon, realY = lat;
+    if (typeof proj4 !== 'undefined') {
+        const utmCoords = proj4("EPSG:4326", targetCRS, [lon, lat]);
+        realX = utmCoords[0];
+        realY = utmCoords[1];
+    }
+
+    const realZ = alt + (window.gpsAltitudeOffset || 0);
+    const ptGis = [realX, realY, realZ];
+
+    // 3. Conversione in coordinate 3D Three.js locali
+    const ptThree = getLocalPositionFromGPS(lat, lon, alt);
+    if (!ptThree) {
+        alert("Error calculating 3D position from GNSS!");
+        return;
+    }
+
+    // Feedback visivo sul riquadro dei sensori
+    const box = document.getElementById('sensor-data-box');
+    if (box) {
+        box.style.borderColor = '#00e676';
+        setTimeout(() => { box.style.borderColor = ''; }, 300);
+    }
+
+    // 4. Eredita gli attributi dal modulo Digitize
+    const fType = document.getElementById('input-type')?.value || 'GNSS_Spot';
+    const unit = document.getElementById('input-unit')?.value || '';
+    const set = document.getElementById('input-set')?.value || '';
+    const mode = document.getElementById('digitize-mode')?.value || 'spot_point';
+
+    const customFields = {};
+    document.querySelectorAll('#custom-fields-container .custom-field-row').forEach(row => {
+        const key = row.querySelector('.custom-key')?.value;
+        const val = row.querySelector('.custom-val')?.value;
+        if (key) customFields[key] = val;
+    });
+
+    const fid = window.featureCounter++;
+
+    // 5. Creazione della Feature (Spot Point o Note)
+    if (mode === 'note') {
+        const noteType = window.currentNoteType || 'text';
+        const noteText = document.getElementById('note-text-content')?.value || '';
+
+        const markerGroup = createNoteMarker(ptThree, noteType);
+        markerGroup.userData = { featureId: fid };
+        markerGroup.traverse(c => c.userData = { featureId: fid });
+        window.scene.add(markerGroup);
+
+        window.digitizedFeatures.push({
+            id: fid,
+            is_note: true,
+            note_type: noteType,
+            f_type: fType,
+            unit: unit,
+            set: set,
+            point: ptGis,
+            text: noteText,
+            custom_fields: customFields,
+            group: markerGroup
+        });
+    } else {
+        const geometry = document.getElementById('input-geometry')?.value || 'plane';
+        const strike = parseFloat(document.getElementById('input-strike')?.value || 0);
+        const dipDir = parseFloat(document.getElementById('input-dipdir')?.value || 90);
+        const dip = parseFloat(document.getElementById('input-dip')?.value || 45);
+        const trend = parseFloat(document.getElementById('input-trend')?.value || 0);
+        const plunge = parseFloat(document.getElementById('input-plunge')?.value || 0);
+        const rake = parseFloat(document.getElementById('input-rake')?.value || 90);
+        const sense = document.getElementById('input-sense')?.value || 'NA';
+
+        let spotGroup;
+        if (geometry === 'line') {
+            spotGroup = createLineArrowGroup(ptThree, trend, plunge);
+        } else if (geometry === 'plane') {
+            spotGroup = createOrientedDiskGroup(ptThree, dipDir, dip);
+        } else {
+            spotGroup = createOrientedDiskGroup(ptThree, dipDir, dip);
+            if (typeof createRakeIndicator === 'function') {
+                spotGroup.add(createRakeIndicator(strike, dip, rake, sense));
+            }
+        }
+
+        spotGroup.userData = { featureId: fid };
+        spotGroup.traverse(c => c.userData = { featureId: fid });
+        window.scene.add(spotGroup);
+
+        const featureData = {
+            id: fid,
+            is_manual_spot: true,
+            f_type: fType,
+            unit: unit,
+            set: set,
+            color: '#00e676',
+            point: ptGis,
+            geometry: geometry,
+            custom_fields: customFields,
+            group: spotGroup
+        };
+
+        if (geometry === 'line') {
+            featureData.trend = trend;
+            featureData.plunge = plunge;
+        } else if (geometry === 'plane') {
+            featureData.strike = strike;
+            featureData.dip_dir = dipDir;
+            featureData.dip = dip;
+        } else if (geometry === 'plane&line') {
+            featureData.strike = strike;
+            featureData.dip_dir = dipDir;
+            featureData.dip = dip;
+            featureData.rake = rake;
+            featureData.sense = sense;
+        }
+
+        window.digitizedFeatures.push(featureData);
+    }
+
+    // 6. Aggiorna interfaccia e stato
+    if (typeof updateVisibilityFiltersUI === 'function') updateVisibilityFiltersUI();
+    if (typeof updateUI === 'function') updateUI();
+    if (typeof updateStatus === 'function') {
+        updateStatus(`📍 GNSS Point #${fid} captured!`, '#28a745');
+    }
+}
+// Alterna lo stato minimizzato/espanso del pannello dell'offset Z
+window.toggleAltSliderPanel = function() {
+    const panel = document.getElementById('alt-slider-panel');
+    if (!panel) return;
+
+    panel.classList.toggle('collapsed');
+    
+    const isCollapsed = panel.classList.contains('collapsed');
+    const icon = panel.querySelector('.alt-toggle-icon');
+
+    if (icon) {
+        // Quando è CHIUSO (collapsed) punta a SINISTRA (◀) per indicare di aprirlo
+        // Quando è APERTO punta a DESTRA (▶) per indicare di chiuderlo sul bordo
+        icon.textContent = isCollapsed ? '◀' : '▶';
+    }
+};
+// Espone la funzione per l'evento onclick dell'HTML
+window.captureAtGNSSPosition = captureAtGNSSPosition;

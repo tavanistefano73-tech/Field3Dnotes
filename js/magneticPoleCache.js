@@ -26,22 +26,22 @@ class MagneticPoleCache {
         const cached = this.getFromCache();
         
         if (cached && this.isCacheValid()) {
-            console.log("📍 Polo magnetico da CACHE:", cached);
+            console.log("📍 Magnetic pole from CACHE:", cached);
             return cached;
         }
         
         // Cache scaduta o vuota - prova online
-        console.log("🌐 Cache scaduta o assente, cerco online...");
+        console.log("🌐 Cache expired or missing, searching online...");
         const online = await this.fetchOnline();
         
         if (online) {
             this.saveToCache(online);
-            console.log("✅ Polo magnetico da NOAA:", online);
+            console.log("✅ PMagnetic pole from NOAA:", online);
             return online;
         }
         
         // Fallback al valore di default
-        console.log("⚠️  Uso valore di default (NOAA non disponibile)");
+        console.log("⚠️  Using default value (NOAA unavailable)");
         this.saveToCache(this.defaultPole);
         return this.defaultPole;
     }
@@ -54,7 +54,7 @@ class MagneticPoleCache {
             const cached = localStorage.getItem(this.cacheKey);
             return cached ? JSON.parse(cached) : null;
         } catch (e) {
-            console.warn("Errore lettura cache:", e);
+            console.warn("Error reading cache:", e);
             return null;
         }
     }
@@ -67,7 +67,7 @@ class MagneticPoleCache {
             localStorage.setItem(this.cacheKey, JSON.stringify(pole));
             localStorage.setItem(this.lastUpdateKey, new Date().toISOString());
         } catch (e) {
-            console.warn("Errore salvataggio cache:", e);
+            console.warn("Error saving cache:", e);
         }
     }
 
@@ -111,7 +111,7 @@ class MagneticPoleCache {
             return wmm2025Pole;
             
         } catch (e) {
-            console.warn("Errore fetch online:", e);
+            console.warn("Error fetching online:", e);
             return null;
         }
     }
@@ -123,9 +123,9 @@ class MagneticPoleCache {
         try {
             localStorage.removeItem(this.cacheKey);
             localStorage.removeItem(this.lastUpdateKey);
-            console.log("✅ Cache pulita");
+            console.log("✅ Cache cleared");
         } catch (e) {
-            console.warn("Errore pulizia cache:", e);
+            console.warn("Error clearing cache:", e);
         }
     }
 
@@ -168,7 +168,7 @@ window.initMagneticPole = async function() {
         return Math.round(decl * 10) / 10;
     };
     
-    console.log("✅ Magnetic pole cache e window.currentPole inizializzati");
+    console.log("✅ Magnetic pole cache and window.currentPole initialized");
 };
 
 // Chiama al caricamento

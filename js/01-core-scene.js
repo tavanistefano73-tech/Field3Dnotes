@@ -102,33 +102,29 @@ let rawSensorData = { strike: 0, dipDir: 90, dip: 45, rake: 90 };
 let liveSensorData = { strike: 0, dipDir: 90, dip: 45, rake: 90 };
 let sensorsActive = false;
 
-function getCorrectedOrientation(rawStrike, rawDipDir) {
-    const chkDecl = document.getElementById('chk-use-declination');
-    const inputDecl = document.getElementById('input-declination');
-    const useDecl = chkDecl && chkDecl.checked;
-    const declVal = useDecl ? (parseFloat(inputDecl.value) || 0) : 0;
 
-    const finalStrike = Math.round((rawStrike + declVal + 360) % 360);
-    const finalDipDir = Math.round((rawDipDir + declVal + 360) % 360);
-    return { strike: finalStrike, dipDir: finalDipDir };
-}
 
 function onDeclinationToggleOrChange() {
-    const corrected = getCorrectedOrientation(rawSensorData.strike, rawSensorData.dipDir);
+    const corrected = getCorrectedOrientation(rawSensorData.strike, rawSensorData.dipDir, rawSensorData.trend);
     liveSensorData.strike = corrected.strike;
     liveSensorData.dipDir = corrected.dipDir;
+    liveSensorData.trend = corrected.trend;
     liveSensorData.dip = rawSensorData.dip;
     liveSensorData.rake = rawSensorData.rake;
 
     const elStrike = document.getElementById('sensor-strike');
     const elDipDir = document.getElementById('sensor-dipdir');
+    const elTrend = document.getElementById('sensor-trend');
     if (elStrike) elStrike.textContent = corrected.strike + '°';
     if (elDipDir) elDipDir.textContent = corrected.dipDir + '°';
+    if (elTrend) elTrend.textContent = corrected.trend + '°';
 
     const inputStrike = document.getElementById('input-strike');
     const inputDipDir = document.getElementById('input-dipdir');
+    const inputTrend = document.getElementById('input-trend');
     if (inputStrike) inputStrike.value = corrected.strike;
     if (inputDipDir) inputDipDir.value = corrected.dipDir;
+    if (inputTrend) inputTrend.value = corrected.trend;
 }
 
 function estimateDeclination(lat, lon) {
@@ -196,17 +192,18 @@ window.rawSensorData = { strike: 0, dipDir: 90, dip: 45, rake: 90, trend: 90, pl
 window.liveSensorData = { strike: 0, dipDir: 90, dip: 45, rake: 90, trend: 90, plunge: 45 };
 
 // Declination correction utility
-window.getCorrectedOrientation = function(rawStrike, rawDipDir) {
+window.getCorrectedOrientation = function(rawStrike, rawDipDir, rawTrend) {
     const chkDecl = document.getElementById('chk-use-declination');
     const inputDecl = document.getElementById('input-declination');
     const useDecl = chkDecl && chkDecl.checked;
-    const declVal = useDecl ? (parseFloat(inputDecl?.value) || 0) : 0;
+    const declVal = useDecl ? (parseFloat(inputDecl.value) || 0) : 0;
 
     const finalStrike = Math.round((rawStrike + declVal + 360) % 360);
     const finalDipDir = Math.round((rawDipDir + declVal + 360) % 360);
-    return { strike: finalStrike, dipDir: finalDipDir };
+    const finalTrend = Math.round((rawTrend + declVal + 360) % 360);
+    
+    return { strike: finalStrike, dipDir: finalDipDir, trend: finalTrend };
 };
-
 // Copy current data to HTML input fields
 window.copySensorsToFields = function() {
     if (!window.liveSensorData) return;
@@ -232,30 +229,25 @@ window.handleNativeSensors = function(strike, dipDir, dip, rake, trend, plunge, 
     const rTrend = (trend !== undefined && trend !== null) ? trend : rDipDir;
     const rPlunge = (plunge !== undefined && plunge !== null) ? plunge : rDip;
 
-    const corrected = window.getCorrectedOrientation(rStrike, rDipDir);
+    const corrected = window.getCorrectedOrientation(rStrike, rDipDir, rTrend);
 
-    // 1. Variabili di lavoro inizializzate con l'orientamento corretto
+    // 1. Estrai strike, dipDir E TREND dalla correzione
     let finalStrike = corrected.strike;
     let finalDipDir = corrected.dipDir;
-
-       
-        
+    let finalTrend = corrected.trend;
     
-    // 3. Registrazione nello stato globale (usa finalStrike e finalDipDir)
+    // 3. Registrazione nello stato globale
     window.rawSensorData = { strike: rStrike, dipDir: rDipDir, dip: rDip, rake: rRake, trend: rTrend, plunge: rPlunge };
     window.liveSensorData = {
         strike: finalStrike,
         dipDir: finalDipDir,
         dip: rDip,
         rake: rRake,
-        trend: rTrend,
+        trend: finalTrend,  // ← USA finalTrend, non rTrend!
         plunge: rPlunge
- 
     };
 
-   
-    
-    // Update panel text labels (legge i valori aggiornati da liveSensorData)
+    // Update panel text labels
     const setTxt = (id, val) => {
         const el = document.getElementById(id);
         if (el) el.textContent = val + '°';

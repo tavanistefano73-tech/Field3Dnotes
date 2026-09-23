@@ -11,13 +11,43 @@
             delete window.exports;
           </script>
         
-        
         <meta charset="utf-8">
         <meta name="apple-mobile-web-app-capable" content="yes">
         <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
         <title>3D Standalone Digitizer</title>
+        
+        <script>
+                    (function() {
+                        const ua = navigator.userAgent || navigator.vendor || window.opera;
+
+                        // Detection iOS (inclusi iPad recenti con iPadOS)
+                        const isIOS = /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+                        
+                        // Detection Android
+                        const isAndroid = /Android/i.test(ua);
+                        
+                        // Generico Mobile
+                        const isMobile = isIOS || isAndroid || /Mobi|Tablet|Mobile/i.test(ua);
+
+                        // Variabili globali per l'intero progetto
+                        window.isIOS = isIOS;
+                        window.isAndroid = isAndroid;
+                        window.isMobile = isMobile;
+                        window.isDesktop = !isMobile;
+
+                        console.log(`📱 Platform detected: ${isIOS ? 'iOS' : isAndroid ? 'Android' : 'Desktop'}`);
+
+                        // Aggiunge classe CSS al body quando caricato
+                        document.addEventListener("DOMContentLoaded", () => {
+                            if (isIOS) document.body.classList.add('platform-ios');
+                            else if (isAndroid) document.body.classList.add('platform-android');
+                            else document.body.classList.add('platform-desktop');
+                        });
+                    })();
+                </script>
+        
         <link rel="stylesheet" href="styles.css">
-            <script src="zip.min.js"></script>
+        <script src="zip.min.js"></script>
         
         <script src="three.min.js"></script>
         <script src="OrbitControls.js"></script>
@@ -34,6 +64,11 @@
         </script>
  
         <script src="proj4.js"></script>
+        <script src="jspdf.umd.min.js"></script>
+        <!-- jsPDF per la gestione del documento PDF -->
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+        <!-- svg2pdf per convertire elementi vettoriali in tracciati PDF -->
+        <script src="https://cdn.jsdelivr.net/npm/svg2pdf.js@2.2.3/dist/svg2pdf.umd.min.js"></script>
     </head>
         
 <body>
@@ -60,6 +95,7 @@
                 <span id="stereo-total-count" class="stereo-badge">0</span>
             </div>
             <div class="stereonet-header-actions">
+                <button id="stereonet-export-pdf-btn" class="icon-btn" onclick="exportStereonetPDF()" title="Export to PDF">📄 PDF</button>
                 <button id="stereonet-toggle-btn" class="icon-btn" onclick="toggleStereonetControls()" title="Minimize/Expand Controls">⚙️</button>
                 <button id="stereonet-close-btn" onclick="closeStereonetWindow()">Close</button>
             </div>
@@ -70,7 +106,6 @@
             </div>
             <div id="stereonet-controls">
                 <!-- Dynamic filters and controls -->
-                
             </div>
         </div>
     </div>
@@ -107,106 +142,76 @@
         <div style="height: 30px; width: 100%;"></div>
     </div>
 
-    <div id="app-wrapper">
-        <!-- LEFT SIDEBAR UI -->
-        <div id="ui">
-            <div class="ui-header" style="display: flex; align-items: center; gap: 4px; width: 100%;">
-                <!-- MODEL & JSON LOADING MENU -->
-                <div class="menu-container" style="flex: 1;">
-                    <button class="icon-btn" onclick="toggleMenu(event)" title="Options Menu" style="width: 100%; padding: 6px 0; font-size: 15px;">☰</button>
-                    <div id="dropdown-menu" class="dropdown-menu">
-                        <div class="menu-item" onclick="triggerFileInput(); closeMenu();">Load model</div>
-                        <div class="menu-item" onclick="saveToGeoJSON()">Save to JSON</div>
-                        <div class="menu-item" onclick="triggerGeoJSONInput(); closeMenu();">Load from JSON</div>
-                        <div class="menu-item" onclick="toggleSketchfabPanel(); closeMenu();">Import from Sketchfab</div>
-                    </div>
-                </div>
-
-                <!-- DIGITIZING PANEL TOGGLE -->
-                <button class="icon-btn" onclick="toggleDigitizePanel(event)" title="Toggle Digitizing Panel" style="flex: 1; padding: 6px 0; font-size: 15px;">✏️</button>
-
-                <!-- VISIBILITY FILTERS TOGGLE -->
-                <button class="icon-btn" onclick="toggleFilterPanel(event)" title="Visibility Filters" style="flex: 1; padding: 6px 0; font-size: 15px;">👁️</button>
-
-                <!-- DRAG HANDLE -->
-                <div class="drag-handle" title="Drag panel" style="cursor: grab; padding: 0 4px; color: #aaa; font-weight: bold; user-select: none; touch-action: none; font-size: 17px; display: flex; align-items: center; justify-content: center;">⋮⋮</div>
-            </div>
+    <!-- TOP BAR WITH BUTTONS -->
+    <div id="top-bar">
+        <!-- Left buttons: Menu, Digitize, Filters, Voice Control, CRS -->
+        <div id="top-bar-left">
+            <button class="top-bar-btn" onclick="toggleMenu(event)" title="Options Menu">☰</button>
+            <button class="top-bar-btn" data-state="off" onclick="toggleTopLeftTab(event, 'tab-digitize')">✏️</button>
+            <button class="top-bar-btn" data-state="off" onclick="toggleTopLeftTab(event, 'tab-filters')">👁️</button>
             
-            <!-- CRS SELECTOR -->
-            <div id="crs-wrapper" style="margin: 6px 0 2px 0;">
-                <select id="input-crs" onchange="onCRSChanged()" style="width: 100%; background: #222; color: #fff; border: 1px solid #444; padding: 4px 6px; border-radius: 4px; font-size: 11px; outline: none; box-sizing: border-box;"></select>
-            </div>
-            <div id="ui-content">
-                <input type="file" id="file-input" multiple accept="*/*" style="display:none;" onchange="handleFileUpload(this.files)">
-                <input type="file" id="geojson-input" multiple style="display:none;" onchange="loadGeoJSONFile(this.files)">
-                        
-                        <!-- Sketchfab import panel container -->
-                        <div id="sketchfab-import-panel" style="display: none; border: 1px solid #333; padding: 10px; border-radius: 8px; background-color: #1a1a1a; margin-top: 8px;">
-                            
-                            <div style="font-weight: bold; color: #1D9E75; margin-bottom: 8px;">
-                                🎨 Import from Sketchfab
-                            </div>
+            <!-- VOICE CONTROL BUTTON -->
+            <button id="digitizer-voice-btn" class="top-bar-btn" style="background-color: #00C851; color: white; display: none;" onclick="window.toggleVoiceRecording()" title="Push-to-Talk Voice Command">🎤</button>
+            
+           <!-- CRS SELECTOR -->
+            <select id="input-crs" onchange="onCRSChanged()" style="background: #2a2a2a; color: #888; border: 1px solid #444; padding: 4px 8px; border-radius: 4px; font-size: 12px; outline: none; box-sizing: border-box; cursor: pointer; height: 32px; width: 100px; vertical-align: middle; line-height: 1.5;"></select>
+        </div>
 
-                            <!-- 3 vertical rows layout -->
-                            <div style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
-                                
-                                <!-- Row 1: API Key -->
-                                <input
-                                    type="text"
-                                    id="sketchfab-api-token"
-                                    placeholder="API key"
-                                    style="width: 100%; box-sizing: border-box; padding: 6px 8px; background-color: #000; color: #fff; border: 1px solid #444; border-radius: 4px;"
-                                />
+        <!-- Right buttons: Sensor, Perf -->
+        <div id="top-bar-right">
+            <button id="btn-top-sensor" class="top-bar-btn" data-state="off" onclick="toggleTopRightSection(event, 'tab-geo')">🧭</button>
+            <button id="btn-top-perf" class="top-bar-btn" data-state="off" onclick="toggleTopRightSection(event, 'tab-perf')">📈</button>
+        </div>
+    </div>
 
-                                <!-- Row 2: Model URL -->
-                                <input
-                                    type="text"
-                                    id="sketchfab-url-input"
-                                    placeholder="Paste Sketchfab Model URL..."
-                                    style="width: 100%; box-sizing: border-box; padding: 6px 8px; background-color: #000; color: #fff; border: 1px solid #444; border-radius: 4px;"
-                                />
-
-                                <!-- Row 3: Import Button -->
-                                <button
-                                    onclick="executeSketchfabDownload()"
-                                    style="width: 100%; box-sizing: border-box; padding: 8px; background-color: #1D9E75; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;"
-                                >
-                                    Import
-                                </button>
-
-                            </div>
-                        </div>
-                        
-                        
-                <div id="digitize-controls" class="ui-hideable">
-                    <div style="margin: 6px 0; border-top: 1px solid #444; padding-top: 4px;">
+    <!-- TOP BAR TABS LEFT (Digitize & Filters) -->
+    <div id="top-bar-tabs-left">
+        <!-- TAB 1: DIGITIZE -->
+        <div id="tab-digitize" class="top-tab-content-left">
+            <div id="digitize-controls" class="ui-hideable">
+                <!-- SEZIONE 1: ATTRIBUTI E CUSTOM FIELDS -->
+                <div class="collapsible-group collapsed" style="border-top: 1px solid #444; margin-top: 6px; padding-top: 4px;">
+                    <div class="collapsible-header" onclick="toggleSection('section-attributes', this)">
+                        <span>Attributes</span>
+                        <button type="button" class="btn-toggle">▾</button>
+                    </div>
+                    <div id="section-attributes" class="collapsible-content">
                         <div class="field-group"><label>Type:</label><input type="text" id="input-type" placeholder="e.g. Fault"></div>
                         <div class="field-group"><label>Unit:</label><input type="text" id="input-unit" placeholder="e.g. Formation A"></div>
                         <div class="field-group"><label>Set:</label><input type="text" id="input-set" placeholder="e.g. Set 1"></div>
-                    </div>
-                    
-                    <!-- DYNAMIC CUSTOM FIELDS -->
-                    <div style="margin: 6px 0; border-top: 1px solid #444; padding-top: 4px;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                            <span style="font-size: 11px; color: #aaa; font-weight: bold;">Custom Fields:</span>
-                            <button type="button" onclick="addCustomFieldInput()" style="font-size: 10px; padding: 2px 6px; background: #333; color: #fff; border: 1px solid #555; border-radius: 3px; cursor: pointer;">+ Add</button>
+                        
+                        <!-- DYNAMIC CUSTOM FIELDS -->
+                        <div style="margin-top: 6px; border-top: 1px solid #333; padding-top: 4px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                                <span style="font-size: 11px; color: #aaa; font-weight: bold;">Custom Fields:</span>
+                                <button type="button" onclick="addCustomFieldInput()" style="font-size: 10px; padding: 2px 6px; background: #333; color: #fff; border: 1px solid #555; border-radius: 3px; cursor: pointer;">+ Add</button>
+                            </div>
+                            <div id="custom-fields-container"></div>
                         </div>
-                        <div id="custom-fields-container"></div>
                     </div>
-                    
-                    <div style="margin: 6px 0; border-top: 1px solid #444; padding-top: 4px;">
-                        <div class="field-group">
-                            <label>Mode:</label>
-                            <select id="digitize-mode" onchange="toggleDigitizeModeUI(); this.blur();">
-                                <option value="polyline">Polyline (3D Plane)</option>
-                                <option value="simple_polyline">Simple Polyline (Line Only)</option>
-                                <option value="spot_point" selected>Manual Spot Orientation</option>
-                                <option value="note">Note</option>
-                            </select>
-                        </div>
+                </div>
 
-                        <div id="manual-orient-inputs" style="display:block; margin-top:4px; background:#222; padding:5px; border-radius:4px;">
-                            <div class="field-group">
+                <!-- SELEZIONE MODALITÀ -->
+                <div style="margin: 6px 0; border-top: 1px solid #444; padding-top: 4px;">
+                    <div class="field-group">
+                        <label>Mode:</label>
+                        <select id="digitize-mode" onchange="toggleDigitizeModeUI(); this.blur();">
+                            <option value="polyline">Polyline (3D Plane)</option>
+                            <option value="draped_polygon">Draped Polygon</option>
+                            <option value="simple_polyline">Simple Polyline (Line Only)</option>
+                            <option value="spot_point" selected>Manual Spot Orientation</option>
+                            <option value="note">Note</option>
+                        </select>
+                    </div>
+
+                    <!-- SEZIONE 2: MISURE E ORIENTAMENTO -->
+                    <div id="manual-orient-inputs" style="display:block; margin-top:4px; background:#222; padding:5px; border-radius:4px;">
+                        <div class="collapsible-header" onclick="toggleSection('section-geometry', this)">
+                            <span>Orientation</span>
+                            <button type="button" class="btn-toggle">▾</button>
+                        </div>
+                        <div id="section-geometry" class="collapsible-content">
+                            <div class="field-group" style="margin-top: 4px;">
                                 <label for="input-geometry">Geometry:</label>
                                 <select id="input-geometry" onchange="updateGeometryFields()">
                                     <option value="plane">Plane</option>
@@ -242,72 +247,103 @@
 
                             <div class="field-group"><label>Radius (px):</label><input type="number" id="input-disk-size" value="35" min="5" max="300" step="1"></div>
                         </div>
+                    </div>
 
-                        <div id="note-mode-inputs" style="display:none; margin-top:4px; background:#222; padding:5px; border-radius:4px;">
-                            <div id="note-tabs">
-                                <button id="note-tab-text" class="note-tab active" onclick="selectNoteType('text')">📄</button>
-                                <button id="note-tab-photo" class="note-tab" onclick="selectNoteType('photo')">📷</button>
-                                <button id="note-tab-sketch" class="note-tab" onclick="selectNoteType('sketch')">✏️</button>
-                                <button id="note-tab-audio" class="note-tab" onclick="selectNoteType('audio')">🎤</button>
+                    <!-- NOTE INPUTS -->
+                    <div id="note-mode-inputs" style="display:none; margin-top:4px; background:#222; padding:5px; border-radius:4px;">
+                        <div id="note-tabs">
+                            <button id="note-tab-text" class="note-tab active" onclick="selectNoteType('text')">📄</button>
+                            <button id="note-tab-photo" class="note-tab" onclick="selectNoteType('photo')">📷</button>
+                            <button id="note-tab-sketch" class="note-tab" onclick="selectNoteType('sketch')">✏️</button>
+                            <button id="note-tab-audio" class="note-tab" onclick="selectNoteType('audio')">🎤</button>
+                        </div>
+
+                        <div id="note-panel-text" class="note-panel">
+                            <textarea id="note-text-content" placeholder="Write your note here..." rows="4"></textarea>
+                        </div>
+                        <div id="note-panel-photo" class="note-panel" style="display:none;">
+                            <input type="file" id="note-photo-input" accept="image/*" style="display:none;" onchange="handleNotePhotoSelected(this.files)">
+                            <div id="note-photo-preview-wrapper" style="display:none;">
+                                <img id="note-photo-preview" style="width:100%; border-radius:6px; display:block; margin-bottom:6px;">
+                                <textarea id="note-photo-caption" placeholder="Caption (optional)..." rows="2" style="margin-bottom:6px;"></textarea>
+                                <button type="button" onclick="clearNotePhoto()" style="background:#2a2a2a; border:1px solid #444;">✖ Remove</button>
+                            </div>
+                            <button type="button" id="note-photo-capture-btn" onclick="document.getElementById('note-photo-input').click()">📷 Capture / Choose photo</button>
+                        </div>
+                        
+                        <div id="note-panel-sketch" class="note-panel" style="display:none;">
+                            <div id="sketch-preview-wrapper" style="display:none;">
+                                <img id="sketch-preview" style="width:100%; border-radius:6px; display:block; margin-bottom:6px;">
+                                <button type="button" onclick="clearSketchNote()" style="background:#2a2a2a; border:1px solid #444; width:100%;">✖ Remove Sketch</button>
+                            </div>
+                            <button type="button" id="sketch-open-btn" onclick="openSketchOverlay()">✏️ Create Sketch</button>
+                        </div>
+                        
+                        <div id="note-panel-audio" class="note-panel" style="display:none;">
+                            <div style="text-align: center; margin: 15px 0;">
+                                <div id="audio-timer" style="font-size: 24px; font-family: monospace; font-weight: bold; margin-bottom: 10px; color: #17a2b8;">00:00</div>
+                                <button id="btn-record-audio" type="button" onclick="toggleAudioRecording()" style="padding: 10px 20px; font-size: 16px; border-radius: 20px; border: none; background: #dc3545; color: white; cursor: pointer;">
+                                    🎤 Record
+                                </button>
                             </div>
 
-                            <div id="note-panel-text" class="note-panel">
-                                <textarea id="note-text-content" placeholder="Write your note here..." rows="4"></textarea>
+                            <div id="audio-preview-wrapper" style="display:none; margin-top: 10px;">
+                                <audio id="audio-preview" controls style="width: 100%;"></audio>
+                                <button type="button" onclick="clearAudioNote()" style="margin-top: 5px; background: #6c757d; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer;">
+                                    🗑️ Delete Audio
+                                </button>
                             </div>
-                            <div id="note-panel-photo" class="note-panel" style="display:none;">
-                                <input type="file" id="note-photo-input" accept="image/*" style="display:none;" onchange="handleNotePhotoSelected(this.files)">
-                                <div id="note-photo-preview-wrapper" style="display:none;">
-                                    <img id="note-photo-preview" style="width:100%; border-radius:6px; display:block; margin-bottom:6px;">
-                                    <textarea id="note-photo-caption" placeholder="Caption (optional)..." rows="2" style="margin-bottom:6px;"></textarea>
-                                    <button type="button" onclick="clearNotePhoto()" style="background:#2a2a2a; border:1px solid #444;">✖ Remove</button>
-                                </div>
-                                <button type="button" id="note-photo-capture-btn" onclick="document.getElementById('note-photo-input').click()">📷 Capture / Choose photo</button>
-                            </div>
-                            
-                            <div id="note-panel-sketch" class="note-panel" style="display:none;">
-                                <div id="sketch-preview-wrapper" style="display:none;">
-                                    <img id="sketch-preview" style="width:100%; border-radius:6px; display:block; margin-bottom:6px;">
-                                    <button type="button" onclick="clearSketchNote()" style="background:#2a2a2a; border:1px solid #444; width:100%;">✖ Remove Sketch</button>
-                                </div>
-                                <button type="button" id="sketch-open-btn" onclick="openSketchOverlay()">✏️ Create Sketch</button>
-                            </div>
-                            
-                            <div id="note-panel-audio" class="note-panel" style="display:none;">
-                                <div style="text-align: center; margin: 15px 0;">
-                                    <div id="audio-timer" style="font-size: 24px; font-family: monospace; font-weight: bold; margin-bottom: 10px; color: #17a2b8;">00:00</div>
-                                    
-                                    <button id="btn-record-audio" type="button" onclick="toggleAudioRecording()" style="padding: 10px 20px; font-size: 16px; border-radius: 20px; border: none; background: #dc3545; color: white; cursor: pointer;">
-                                        🎤 Record
-                                    </button>
-                                </div>
 
-                                <div id="audio-preview-wrapper" style="display:none; margin-top: 10px;">
-                                    <audio id="audio-preview" controls style="width: 100%;"></audio>
-                                    <button type="button" onclick="clearAudioNote()" style="margin-top: 5px; background: #6c757d; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer;">
-                                        🗑️ Delete Audio
-                                    </button>
-                                </div>
-
-                                <input type="text" id="note-audio-caption" placeholder="Audio note caption (optional)..." style="width: 100%; margin-top: 10px; padding: 8px; box-sizing: border-box;">
-                            </div>
+                            <input type="text" id="note-audio-caption" placeholder="Audio note caption (optional)..." style="width: 100%; margin-top: 10px; padding: 8px; box-sizing: border-box;">
                         </div>
                     </div>
-
-                    <button id="btn-toggle-digitize" class="start-btn" onclick="toggleDigitizing()">▶ Start Digitizing</button>
                 </div>
 
-                <div id="filter-section" class="filter-section" style="display: none;">
-                    <div class="filter-title">👁️ Visibility Filters</div>
-                    <div class="field-group" style="justify-content: flex-start; gap: 5px; margin-bottom: 6px;">
-                        <input type="checkbox" id="chk-show-notes" style="width: auto; accent-color:#1D9E75;" checked onchange="applyVisibilityFilters()">
-                        <label for="chk-show-notes" style="color:#aaa; font-size:10px; cursor:pointer;">Show Notes 📝</label>
+                <button id="btn-toggle-digitize" class="start-btn" onclick="toggleDigitizing()">▶ Start Digitizing</button>
+            </div>
+        </div>
+
+        <!-- TAB 2: FILTERS -->
+        <div id="tab-filters" class="top-tab-content-left">
+            <div id="filter-section" class="filter-section">
+                <div class="filter-title">👁️ Visibility Filters</div>
+                <div class="field-group" style="justify-content: flex-start; gap: 5px; margin-bottom: 6px;">
+                    <input type="checkbox" id="chk-show-notes" style="width: auto; accent-color:#1D9E75;" checked onchange="applyVisibilityFilters()">
+                    <label for="chk-show-notes" style="color:#aaa; font-size:10px; cursor:pointer;">Show Notes 📝</label>
+                </div>
+                <div class="filter-category">By Type:</div>
+                <div id="filter-type-list" class="filter-list"><span style="color:#666; font-size: 9px; font-style: italic;">No items</span></div>
+                <div class="filter-category">By Unit:</div>
+                <div id="filter-unit-list" class="filter-list"><span style="color:#666; font-size: 9px; font-style: italic;">No items</span></div>
+                <div class="filter-category">By Set:</div>
+                <div id="filter-set-list" class="filter-list"><span style="color:#666; font-size: 9px; font-style: italic;">No items</span></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- DROPDOWN MENU -->
+    <div id="dropdown-menu" class="dropdown-menu">
+        <div class="menu-item" onclick="triggerFileInput(); closeMenu();">Load model</div>
+        <div class="menu-item" onclick="saveToGeoJSON()">Save to JSON</div>
+        <div class="menu-item" onclick="triggerGeoJSONInput(); closeMenu();">Load from JSON</div>
+        <div class="menu-item" onclick="toggleSketchfabPanel(); closeMenu();">Import from Sketchfab</div>
+    </div>
+
+    <div id="app-wrapper">
+        <!-- LEFT SIDEBAR UI -->
+        <div id="ui">
+            <div id="ui-content">
+                <input type="file" id="file-input" multiple accept="*/*" style="display:none;" onchange="handleFileUpload(this.files)" />
+                <input type="file" id="geojson-input" multiple accept=".geojson" style="display:none;" onchange="loadGeoJSONFile(this.files)" />
+                
+                <!-- Sketchfab import panel container -->
+                <div id="sketchfab-import-panel" style="display: none; border: 1px solid #333; padding: 10px; border-radius: 8px; background-color: #1a1a1a; margin-top: 26px;">
+                    <div style="font-weight: bold; color: #1D9E75; margin-bottom: 8px;">🎨 Import from Sketchfab</div>
+                    <div style="display: flex; flex-direction: column; gap: 8px; width: 100%;">
+                        <input type="text" id="sketchfab-api-token" placeholder="API key" style="width: 100%; box-sizing: border-box; padding: 6px 8px; background-color: #000; color: #fff; border: 1px solid #444; border-radius: 4px;" />
+                        <input type="text" id="sketchfab-url-input" placeholder="Paste Sketchfab Model URL..." style="width: 100%; box-sizing: border-box; padding: 6px 8px; background-color: #000; color: #fff; border: 1px solid #444; border-radius: 4px;" />
+                        <button onclick="executeSketchfabDownload()" style="width: 100%; box-sizing: border-box; padding: 8px; background-color: #1D9E75; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">Import</button>
                     </div>
-                    <div class="filter-category">By Type:</div>
-                    <div id="filter-type-list" class="filter-list"><span style="color:#666;">No items</span></div>
-                    <div class="filter-category">By Unit:</div>
-                    <div id="filter-unit-list" class="filter-list"><span style="color:#666;">No items</span></div>
-                    <div class="filter-category">By Set:</div>
-                    <div id="filter-set-list" class="filter-list"><span style="color:#666;">No items</span></div>
                 </div>
 
                 <div id="status">Waiting for model...</div>
@@ -316,31 +352,19 @@
 
         <!-- TOP RIGHT CONTAINER -->
         <div id="top-right-container">
-            <div class="top-right-header">
-                <div class="drag-handle" title="Drag panel">⋮⋮</div>
-                
-                <!-- TOGGLE BUTTONS -->
-                <div class="top-right-tabs">
-                    <button class="top-tab-btn" data-state="off" onclick="toggleTopRightSection(event, 'tab-geo')">📐</button>
-                    <button class="top-tab-btn" data-state="off" onclick="toggleTopRightSection(event, 'tab-perf')">🖥️</button>
-                </div>
-               
-            </div>
             <div id="top-right-content">
-                <!-- TAB 1: GEOLOGIA (Strike, Dip, Autovalori, Sensori, Declinazione) -->
+                <!-- TAB 1: GEOLOGIA -->
                 <div id="tab-geo" class="top-tab-content">
-                    <!-- 3D POLYLINE METRICS PANEL (Autovalori / Collinear-Coplanar) -->
                     <div id="polyline-metrics-ui" style="display: none;">
                         <div class="info">Active nodes: <strong id="node-count">0</strong></div>
                         <div class="info">Collinear (&lambda;<sub>max</sub>/&lambda;<sub>med</sub>): <strong id="collinear-val" class="metric-highlight">-</strong></div>
                         <div class="info">Coplanar (1/&lambda;<sub>min</sub>): <strong id="coplanar-val" class="metric-highlight">-</strong></div>
                     </div>
-                    <!-- SENSOR PANEL & DECLINAZIONE -->
                     <div id="sensor-ui">
                         <div style="display:flex; justify-content:flex-end; margin-bottom:2px;">
                             <span id="sensor-dot" style="width:7px; height:7px; border-radius:50%; background:#888;"></span>
                         </div>
-                        <div id="sensor-data-box">
+                        <div id="sensor-data-box" onclick="captureAtGNSSPosition(event)" title="Click to Capture Point at GNSS Position">
                             <div><strong>Str:</strong> <span id="sensor-strike">0°</span></div>
                             <div><strong>DipDir:</strong> <span id="sensor-dipdir">0°</span></div>
                             <div><strong>Dip:</strong> <span id="sensor-dip">0°</span></div>
@@ -370,11 +394,10 @@
                         </div>
                     </div>
                 </div>
-                <!-- TAB 2: PERFORMANCE (VRAM & FPS) -->
+
+                <!-- TAB 2: PERFORMANCE -->
                 <div id="tab-perf" class="top-tab-content">
-                    <!-- PERFORMANCE CONTROLS -->
                     <div id="perf-controls-ui">
-                        <!-- VRAM VALUES -->
                         <div style="font-size: 9px; background: rgba(255,255,255,0.05); padding: 4px 6px; border-radius: 4px; margin-bottom: 6px;">
                             <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
                                 <span style="color: #aaa;">Geom:</span>
@@ -386,14 +409,12 @@
                             </div>
                         </div>
 
-                        <!-- FPS TOGGLE -->
                         <div style="margin-bottom: 6px;">
                             <button id="btn-toggle-fps" class="mini-btn" onclick="window.toggleFPSValue()" style="width: 100%;">
                                 ⏱️ FPS: 20
                             </button>
                         </div>
 
-                        <!-- QUALITY PRESETS -->
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
                             <button type="button" onclick="setPerformancePreset('low')" class="vram-btn-compact">Low</button>
                             <button type="button" onclick="setPerformancePreset('mid')" class="vram-btn-compact">Mid</button>
@@ -402,23 +423,24 @@
                         </div>
                     </div>
                 </div>
-                
             </div>
         </div>
 
         <!-- BOTTOM LEFT CONTROLS -->
         <div id="bottom-left-controls">
             <button id="btn-recenter" class="mini-btn" onclick="recenterScene()" title="Recenter scene to original view">🎯 Recenter</button>
-           
             <button id="btn-toggle-clip" class="mini-btn" onclick="toggleClipPopup()" title="Camera Clipping Planes">📷 Clip</button>
             <button id="btn-lasso" class="mini-btn" onclick="toggleLassoMode()" title="Draw a lasso to select features and plot on stereonet">🔵 Lasso</button>
             <button id="btn-rotate-model" class="mini-btn" onclick="toggleRotateMenu()" title="Rotate Model">🔄 Rotate</button>
             <button id="btn-toggle-theme" class="mini-btn" onclick="toggleTheme()" title="Toggle Light/Dark Theme">🌓 Theme</button>
             <button id="btn-gps-toggle" class="mini-btn" onclick="toggleGPS()" title="Show/Hide Location marker">📍 Show Me</button>
             <button id="btn-goto-location" class="mini-btn" onclick="centerOnLocation()" title="Center camera on your location">🎯 Go to Location</button>
-            
-            <button id="btn-calibration" onclick="startCalibration()" title="Calibration (5 points)" style="display: none;">
-                📍 Calibration
+            <button id="btn-calibration" onclick="startCalibration()" title="Calibration (5 points)" style="display: none;">📍 Calibration</button>
+            <button id="btnNtrip" class="mini-btn" onclick="toggleNtripModal()" title="Configura RTK / NTRIP">
+                📡 RTK <span id="ntripStatusDot" class="status-dot status-disconnected"></span>
+            </button>
+            <button id="btn-measure" class="top-bar-btn" onclick="toggleMeasureTool(event)">
+                📏 <span>Measure</span>
             </button>
         </div>
 
@@ -457,43 +479,34 @@
         <div id="canvas-container"></div>
     </div>
     
+    <!-- SLIDER OFFSET ALTITUDINE -->
+    <div id="alt-slider-panel" class="alt-slider-panel collapsed" style="display: none;">
+      <button type="button" id="btn-alt-toggle" class="btn-alt-toggle" onclick="window.toggleAltSliderPanel()" title="Expand/Collapse Z Offset">
+        <span class="alt-toggle-icon">▶</span>
+      </button>
+
+      <div id="alt-slider-body" class="alt-slider-body">
+        <span class="alt-label-title">OFFSET Z</span>
+        <div class="slider-wrapper">
+          <input type="range" id="input-alt-slider" min="-100" max="100" step="0.5" value="0" orient="vertical" oninput="window.updateGpsAltitudeOffset(this.value)" />
+        </div>
+        <div class="alt-value-box">
+          <input type="number" id="alt-offset-input" value="0.0" step="0.5" onchange="window.updateGpsAltitudeOffset(this.value)" onkeydown="if(event.key==='Enter') window.updateGpsAltitudeOffset(this.value)" />
+          <span>m</span>
+        </div>
+        <div class="alt-btn-group">
+          <button type="button" class="btn-alt-reset" onclick="window.updateGpsAltitudeOffset(0)" title="Reset to 0m">↺</button>
+          <button type="button" class="btn-alt-reset" onclick="window.snapToTerrain()" title="Auto-snap to 3D surface">🎯</button>
+        </div>
+      </div>
+    </div>
     
-    <!-- ======================================================== -->
-            <!-- SLIDER OFFSET ALTITUDINE (POSIZIONATO A DESTRA)          -->
-            <!-- ======================================================== -->
-            <div id="alt-slider-panel" class="alt-slider-panel" style="display: none;">
-              <span class="alt-label-title">Offset Z</span>
-              
-              <div class="slider-wrapper">
-                <span class="alt-limit">+100m</span>
-                <input
-                  type="range"
-                  id="input-alt-slider"
-                  min="-100"
-                  max="100"
-                  step="0.5"
-                  value="0"
-                  orient="vertical"
-                  oninput="window.updateGpsAltitudeOffset(this.value)"
-                />
-                <span class="alt-limit">-100m</span>
-              </div>
+    <!-- BADGE PRECISIONE RTK / GNSS -->
+    <div id="rtk-precision-badge" class="rtk-badge rtk-single" style="display: none;">
+        <span id="rtk-status-text">GPS STANDARD</span>
+        <span id="rtk-accuracy-text">± 2.5 m</span>
+    </div>
 
-              <span id="alt-offset-val" class="alt-value-display">0.0m</span>
-              
-              <button type="button" class="btn-alt-reset" onclick="document.getElementById('input-alt-slider').value=0; window.updateGpsAltitudeOffset(0);" title="Resetta a 0m">
-                ↺
-              </button>
-              <!-- PULSANTE RAYCASTING AUTOMATICO -->
-                  <button type="button" class="btn-alt-reset" onclick="window.snapToTerrain()" title="Snap automatico alla superficie 3D" style="font-size: 10px;">
-                    🎯
-                  </button>
-            </div>
-            <!-- ======================================================== -->
-
-        </div><!-- fine #app-wrapper -->
-        
-        
     <!-- ROTATION MENU POPUP -->
     <div id="rotate-model-menu"
          onpointerdown="event.stopPropagation()"
@@ -505,41 +518,67 @@
          style="display: none; position: fixed; bottom: 0; left: 0; width: 100vw; background: #1e1e1e; padding: 10px 14px; border-top: 1px solid #444; color: #fff; z-index: 99999; box-sizing: border-box; pointer-events: auto;">
         
         <div style="display: flex; align-items: center; gap: 10px; width: 100%; box-sizing: border-box;">
-            <button
-                type="button"
-                onclick="toggleRotateMenu()"
-                style="width: auto !important; min-width: 0 !important; max-width: fit-content !important; flex: 0 0 auto !important; background: transparent !important; border: none !important; color: #fff !important; font-size: 20px !important; cursor: pointer !important; padding: 0 4px !important; line-height: 1 !important; margin: 0 !important;"
-                title="Close"
-            >⊗</button>
-
+            <button type="button" onclick="toggleRotateMenu()" style="width: auto !important; min-width: 0 !important; max-width: fit-content !important; flex: 0 0 auto !important; background: transparent !important; border: none !important; color: #fff !important; font-size: 20px !important; cursor: pointer !important; padding: 0 4px !important; line-height: 1 !important; margin: 0 !important;" title="Close">⊗</button>
             <span style="font-size: 13px; font-weight: bold; color: #fff; flex: 0 0 auto;">Rotation:</span>
-            
-            <input
-                type="number"
-                id="rotate-num-input"
-                min="0"
-                max="360"
-                value="0"
-                step="0.5"
-                style="width: 50px !important; flex: 0 0 auto !important; background: #111; color: #fff; border: 1px solid #555; border-radius: 4px; text-align: center; padding: 4px 2px; font-size: 12px;"
-                oninput="syncAndRotateModel(this.value, 'input')"
-            >
-            
+            <input type="number" id="rotate-num-input" min="0" max="360" value="0" step="0.5" style="width: 50px !important; flex: 0 0 auto !important; background: #111; color: #fff; border: 1px solid #555; border-radius: 4px; text-align: center; padding: 4px 2px; font-size: 12px;" oninput="syncAndRotateModel(this.value, 'input')">
             <span style="font-size: 13px; color: #aaa; flex: 0 0 auto;">°</span>
-
-            <input
-                type="range"
-                id="rotate-slider"
-                min="0"
-                max="360"
-                value="0"
-                step="0.5"
-                style="flex: 1 1 auto !important; min-width: 0 !important; width: 100% !important; accent-color: #1D9E75; cursor: pointer; margin: 0;"
-                oninput="syncAndRotateModel(this.value, 'slider')"
-            >
+            <input type="range" id="rotate-slider" min="0" max="360" value="0" step="0.5" style="flex: 1 1 auto !important; min-width: 0 !important; width: 100% !important; accent-color: #1D9E75; cursor: pointer; margin: 0;" oninput="syncAndRotateModel(this.value, 'slider')">
         </div>
     </div>
-    
+
+    <!-- MODAL CONFIGURAZIONE NTRIP -->
+    <div id="ntripModal" class="modal-overlay" style="display: none;">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>📡 RTK / NTRIP Connection</h3>
+                <button class="btn-close" onclick="toggleNtripModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="status-banner">
+                    <span>Caster Status:</span>
+                    <strong id="ntripStatusLabel">Disconnected</strong>
+                </div>
+
+                <div class="form-group">
+                    <label for="ntripHost">Host / Caster IP</label>
+                    <input type="text" id="ntripHost" placeholder="e.g. ntrip.example.com">
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="ntripPort">Port</label>
+                        <input type="number" id="ntripPort" value="2101">
+                    </div>
+                    <div class="form-group">
+                        <label for="ntripMount">Mountpoint</label>
+                        <input type="text" id="ntripMount" placeholder="e.g. VRS_RTCM3">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="ntripUser">Username</label>
+                    <input type="text" id="ntripUser" placeholder="NTRIP User">
+                </div>
+
+                <div class="form-group">
+                    <label for="ntripPass">Password</label>
+                    <input type="password" id="ntripPass" placeholder="Password">
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="gpsSource">GNSS Source</label>
+                <select id="gpsSource" onchange="changeGpsSource(this.value)">
+                    <option value="internal">Internal (iOS GPS)</option>
+                    <option value="ardusimple">Ardusimple (RTK)</option>
+                </select>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-cancel" onclick="toggleNtripModal()">Close</button>
+                <button class="btn-connect" onclick="saveAndConnectNtrip()">Save and Connect</button>
+            </div>
+        </div>
+    </div>
+
     <!-- APPLICATION SCRIPTS -->
     <script src="js/magneticPoleCache.js"></script>
     <script src="js/01-core-scene.js"></script>
@@ -554,7 +593,110 @@
     <script src="js/10-lidar.js"></script>
     <script src="js/11-imhere.js"></script>
     <script src="js/12-3tz-setting.js"></script>
-    <!-- Dopo gli altri script (dopo 08-lasso-stereonet.js) -->
     <script src="js/13-calibration.js"></script>
-    </body>
+    <script src="js/14-ntrip.js"></script>
+    <script src="js/15-draped polygon.js"></script>
+    
+    <!-- 1. Carica prima i parser e il bridge classico -->
+    <script src="js/16-voice-parse.js"></script>
+    <script src="js/17-voice-engine.js"></script>
+    <script src="js/18-voice-app-bridge.js"></script>
+
+    <!-- 2. Importa il modulo Transformers ed esponilo globalmente -->
+    <script type="module">
+        import * as TransformersModule from './js/transformers.min.js';
+        window.transformers = TransformersModule;
+        console.log("✅ Transformers.js attached to window.transformers!");
+    </script>
+        
+    
+    
+    
+    
+    <!-- TOP BAR TAB SWITCHING & TOGGLE SCRIPTS -->
+    <script>
+        function toggleTopRightSection(event, tabId) {
+            if (event) event.stopPropagation();
+            const container = document.getElementById('top-right-container');
+            const tabGeo = document.getElementById('tab-geo');
+            const tabPerf = document.getElementById('tab-perf');
+
+            if (!container) return;
+
+            const isOpen = container.style.display === 'block';
+            const isGeoActive = tabGeo && tabGeo.style.display === 'block';
+            const isPerfActive = tabPerf && tabPerf.style.display === 'block';
+
+            if (isOpen && ((tabId === 'tab-geo' && isGeoActive) || (tabId === 'tab-perf' && isPerfActive))) {
+                container.style.display = 'none';
+            } else {
+                container.style.display = 'block';
+                if (tabGeo) tabGeo.style.display = (tabId === 'tab-geo') ? 'block' : 'none';
+                if (tabPerf) tabPerf.style.display = (tabId === 'tab-perf') ? 'block' : 'none';
+            }
+        }
+
+        function toggleMenu(event) {
+            if (event) event.stopPropagation();
+            
+            const menu = document.getElementById('dropdown-menu');
+            if (!menu) return;
+
+            const isVisible = menu.style.display === 'block';
+
+            if (isVisible) {
+                closeMenu();
+            } else {
+                if (event && event.currentTarget) {
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    menu.style.top = (rect.bottom + 5) + 'px';
+                    menu.style.left = rect.left + 'px';
+                }
+                menu.style.display = 'block';
+            }
+        }
+
+        window.toggleTopLeftTab = function(event, tabId) {
+            const container = document.getElementById('top-bar-tabs-left');
+            const allTabs = container.querySelectorAll('.top-tab-content-left');
+            const button = event.target.closest('button');
+            
+            const activeTab = document.getElementById(tabId);
+            if (activeTab && activeTab.classList.contains('visible')) {
+                activeTab.classList.remove('visible');
+                button.dataset.state = 'off';
+                container.classList.remove('active');
+                return;
+            }
+            
+            allTabs.forEach(tab => tab.classList.remove('visible'));
+            
+            const allButtons = container.parentElement.querySelectorAll('#top-bar-left-tabs .top-bar-btn');
+            allButtons.forEach(btn => btn.dataset.state = 'off');
+            
+            if (activeTab) {
+                activeTab.classList.add('visible');
+                button.dataset.state = 'on';
+                container.classList.add('active');
+            }
+        };
+
+        function closeMenu() {
+            const menu = document.getElementById('dropdown-menu');
+            if (menu) {
+                menu.style.display = 'none';
+            }
+        }
+
+        document.addEventListener('click', function(e) {
+            const menu = document.getElementById('dropdown-menu');
+            if (menu && menu.style.display === 'block') {
+                if (!menu.contains(e.target)) {
+                    closeMenu();
+                }
+            }
+        });
+    </script>
+    
+</body>
 </html>

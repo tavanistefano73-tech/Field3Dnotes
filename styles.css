@@ -1,30 +1,31 @@
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        html, body {
-            width: 100vw;
-            height: 100vh;
-            overflow: hidden;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: #1a1a1a;
-            color: #fff;
-        }
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent; /* Elimina il riquadro di tap */
+    -webkit-touch-callout: none; /* Disabilita il menu a comparsa su pressione prolungata (iOS) */
+}
 
-        #app-wrapper {
-            width: 100vw;
-            height: 100vh;
-            position: absolute;
-            top: 0;
-            left: 0;
-            overflow: hidden;
-        }
+html, body {
+    width: 100vw;
+    height: 100dvh;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #1a1a1a;
+    color: #fff;
+    touch-action: manipulation;
+    overscroll-behavior: none; /* Disabilita l'effetto rimbalzo/pull-to-refresh */
+    -webkit-user-select: none;  /* Comportamento app: testo non selezionabile di default */
+    user-select: none;
+}
 
-        #canvas-container {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 1;
-        }
+/* Permette la selezione solo nei campi dove l'utente deve digitare */
+input, textarea {
+    -webkit-user-select: auto;
+    user-select: auto;
+}
+
+
         
 #canvas-container canvas {
     width: 100% !important;
@@ -32,11 +33,149 @@
     display: block;
 }
 
+/* ============================================================
+   TOP BAR WITH BUTTONS
+   ============================================================ */
+#top-bar {
+    position: fixed;
+    top: max(10px, env(safe-area-inset-top));
+    left: 0;
+    right: 0;
+    height: 40px;
+    background: rgba(30, 30, 30, 0.95);
+    border-bottom: 1px solid #444;
+    display: flex;
+    justify-content: flex-start;
+    align-items: center;
+    padding: 4px 10px;
+    box-sizing: border-box;
+    z-index: 20;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    gap: 4px;
+}
+
+#top-bar-left,
+#top-bar-right,
+#top-bar-left-tabs {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+
+#top-bar-right {
+    margin-left: auto;
+}
+
+.top-bar-btn {
+    background: #2a2a2a;
+    border: 1px solid #444;
+    color: #888;
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: bold;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+
+.top-bar-btn:hover {
+    background: #333;
+    color: #fff;
+}
+
+.top-bar-btn.tab-btn.active {
+    background: #1D9E75;
+    border-color: #1D9E75;
+    color: #fff;
+}
+
+/* ============================================================
+   TOP BAR TABS LEFT (Digitize & Filters)
+   ============================================================ */
+#top-bar-tabs-left {
+    position: fixed;
+    top: 50px;
+    left: max(10px, env(safe-area-inset-left));
+    width: 165px;
+    background: rgba(30, 30, 30, 0.95);
+    border: 1px solid #444;
+    border-radius: 8px;
+    z-index: 19;
+    max-height: calc(100dvh - 70px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 8px;
+    box-sizing: border-box;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    display: none;
+}
+
+#top-bar-tabs-left.active {
+    display: block;
+}
+
+.top-tab-content-left {
+    display: none;
+}
+
+.top-tab-content-left.visible {
+    display: block;
+}
+
+/* ============================================================
+   TOP BAR TABS RIGHT (Sensor & Perf)
+   ============================================================ */
+#top-bar-tabs-content {
+    position: fixed;
+    top: 50px;
+    right: 10px;
+    background: rgba(30, 30, 30, 0.95);
+    border: 1px solid #444;
+    border-radius: 8px;
+    z-index: 19;
+    max-height: calc(100dvh - 70px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 8px;
+    box-sizing: border-box;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    display: none;
+}
+
+#top-bar-tabs-content.active {
+    display: block;
+}
+
+#top-bar-tabs-content .top-tab-content {
+    display: none;
+}
+
+#top-bar-tabs-content .top-tab-content.visible {
+    display: block;
+}
+
+/* ============================================================
+   HIDE ORIGINAL PANELS IN LEFT SIDEBAR
+   ============================================================ */
+#ui #digitize-controls {
+    display: none !important;
+}
+
+#ui #filter-section {
+    display: none !important;
+}
+
         /* UI Sinistra (Controlli Rilievo 3D) */
 /* UI Sinistra (Controlli Rilievo 3D) */
 #ui {
     position: absolute;
-    top: max(10px, env(safe-area-inset-top));
+    top: max(45px, env(safe-area-inset-top));
     left: 10px;
     background: rgba(30, 30, 30, 0.95);
     padding: 8px; border-radius: 8px;
@@ -69,6 +208,12 @@
         }
         #ui::-webkit-scrollbar { width: 4px; }
         #ui::-webkit-scrollbar-thumb { background: #444; border-radius: 2px; }
+
+        #top-bar-tabs-left::-webkit-scrollbar { width: 4px; }
+        #top-bar-tabs-left::-webkit-scrollbar-thumb { background: #444; border-radius: 2px; }
+
+        #top-bar-tabs-content::-webkit-scrollbar { width: 4px; }
+        #top-bar-tabs-content::-webkit-scrollbar-thumb { background: #444; border-radius: 2px; }
 
         #ui.collapsed .ui-hideable {
             display: none !important;
@@ -136,16 +281,46 @@
 /* CONTENITORE PANNELLI IN ALTO A DESTRA */
 #top-right-container {
     position: absolute;
-    top: 10px;
-    right: 10px;
-    display: flex;
-    flex-direction: column;
-    width: 110px;
-    z-index: 10;
-    pointer-events: auto;
-    will-change: left, top;
-    
+    top: 52px;
+    right: 6px;
+    width: 120px;
+    background: rgba(30, 30, 30, 0.95);
+    backdrop-filter: blur(10px);
+    border: 1px solid #444; /* Cambiato da #1D9E75 a grigio #444 */
+    border-radius: 8px;
+    padding: 6px;
+    z-index: 1001;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.6);
+    display: none;
 }
+
+.dropdown-menu {
+    display: none;
+    position: fixed;
+    z-index: 99999;
+    background: #222;
+    border: 1px solid #444;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.6);
+    width: max-content;       /* Si adatta al testo interno */
+    min-width: 140px;         /* Larghezza minima compatta */
+    max-width: 190px;         /* Limite massimo di larghezza */
+    padding: 4px 0;
+    overflow: hidden;
+}
+
+.dropdown-menu .menu-item {
+    padding: 8px 12px;
+    font-size: 12px;
+    color: #fff;
+    cursor: pointer;
+    white-space: nowrap;      /* Mantiene il testo su una sola riga */
+}
+
+.dropdown-menu .menu-item:hover {
+    background-color: #333;
+}
+
 
 /* PULSANTI SCHEDE NEL PANNELLO IN ALTO A DESTRA */
 .tab-btn {
@@ -219,7 +394,6 @@
     border-bottom: none;
     gap: 2px;
 }
-
 /* Stile handle a pallini ridimensionato */
 #top-right-container .drag-handle {
     cursor: grab;
@@ -261,13 +435,12 @@
 
 #declination-ui, #sensor-ui, #polyline-metrics-ui, #perf-controls-ui {
     pointer-events: auto;
-    background: rgba(25, 25, 25, 0.95);
-    padding: 5px 4px;
-    border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    background: transparent;
+    padding: 2px;
     font-size: 10px;
     width: 100%;
-    border: 1px solid #1D9E75;
+    border: none; /* Rimosso il bordo interno verde */
+    box-shadow: none; /* Rimosso l'ombra interna duplicata */
 }
 
 /* Ingrandimento 150% per i checkbox */
@@ -366,7 +539,7 @@
     display: flex;
     gap: 3px;
     background: rgba(25, 25, 25, 0.95);
-    padding: 3px 4px;                   
+    padding: 3px 4px;
     border-radius: 6px;
     border: 1px solid #1D9E75;
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.7);
@@ -481,15 +654,15 @@
             right: 0;
             bottom: 0;
             background: #1a1a1a;
-            z-index: 5000;
+            z-index: 999999;
             flex-direction: column;
             overflow: hidden;
             pointer-events: auto !important;
         }
 
         #stereonet-window.show {
-            display: flex;
-            pointer-events: auto !important;  
+            display: flex; !important;
+            pointer-events: auto !important;
         }
 
         #stereonet-header {
@@ -883,7 +1056,62 @@ body.light-theme {
     background: #eef1f5 !important;
     color: #000000 !important;
 }
+/* ============================================================
+   TOP BAR & TAB PANELS (MATITA / OCCHIO) - TEMA CHIARO
+   ============================================================ */
 
+/* Barra superiore in tema chiaro */
+body.light-theme #top-bar {
+    background: rgba(255, 255, 255, 0.98) !important;
+    border-bottom: 1px solid #cbd5e1 !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1) !important;
+}
+
+/* Pulsanti generali della top bar */
+body.light-theme .top-bar-btn {
+    background: #ffffff !important;
+    border-color: #cbd5e1 !important;
+    color: #334155 !important;
+}
+
+body.light-theme .top-bar-btn:hover {
+    background: #f1f5f9 !important;
+    color: #000000 !important;
+}
+
+/* Stato attivo dei pulsanti tab nella top bar */
+body.light-theme .top-bar-btn.active,
+body.light-theme .top-bar-btn.tab-btn.active {
+    background: #1D9E75 !important;
+    border-color: #1D9E75 !important;
+    color: #ffffff !important;
+}
+
+/* Pannelli a comparsa dei tab di sinistra (Matita / Occhio) e destra */
+body.light-theme #top-bar-tabs-left,
+body.light-theme #top-bar-tabs-content {
+    background: rgba(255, 255, 255, 0.98) !important;
+    border: 1px solid #cbd5e1 !important;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15) !important;
+    color: #000000 !important;
+}
+
+/* Testi ed etichette all'interno dei pannelli tab */
+body.light-theme #top-bar-tabs-left,
+body.light-theme #top-bar-tabs-content,
+body.light-theme #top-bar-tabs-left label,
+body.light-theme #top-bar-tabs-content label,
+body.light-theme #top-bar-tabs-left span,
+body.light-theme #top-bar-tabs-content span,
+body.light-theme #top-bar-tabs-left div {
+    color: #000000 !important;
+}
+
+/* Scrollbar dei pannelli a comparsa in tema chiaro */
+body.light-theme #top-bar-tabs-left::-webkit-scrollbar-thumb,
+body.light-theme #top-bar-tabs-content::-webkit-scrollbar-thumb {
+    background: #94a3b8 !important;
+}
 /* PANNELLO PRINCIPALE SINISTRA (#ui) */
 body.light-theme #ui {
     background: rgba(255, 255, 255, 0.98) !important;
@@ -891,7 +1119,22 @@ body.light-theme #ui {
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15) !important;
     color: #000000 !important;
 }
+body.light-theme .top-bar-btn {
+    background: #f0f0f0;
+    border-color: #ddd;
+    color: #555;
+}
 
+body.light-theme .top-bar-btn:hover {
+    background: #e0e0e0;
+    color: #000;
+}
+
+body.light-theme #input-crs {
+    background: #f0f0f0;
+    border-color: #ddd;
+    color: #555;
+}
 body.light-theme .ui-header {
     border-bottom-color: #cbd5e1 !important;
 }
@@ -1312,19 +1555,36 @@ body.light-theme #clipping-ui .popup-close-btn:hover,
 }
 
 
-}
+
 
 
 #btn-gps-toggle:not(.pressed) {
     background-color: #2a2a2a !important;
     color: #aaa !important;
 }
+
+body.light-theme #btn-gps-toggle:not(.pressed) {
+    background-color: #ffffff !important;
+    color: #334155 !important;
+    border-color: #cbd5e1 !important;
+}
+
+body.light-theme #btn-gps-toggle:not(.pressed):hover {
+    background-color: #e2e8f0 !important;
+    color: #000000 !important;
+}
+
+#btn-gps-toggle.pressed {
+    background-color: #1D9E75 !important;
+    color: #ffffff !important;
+    border-color: #1D9E75 !important;
+}
 /* Sposa il menù clipping in alto quando la tastiera si apre / un input è a fuoco */
 #clipping-ui:focus-within {
     bottom: auto !important;
     top: max(60px, env(safe-area-inset-top) + 50px) !important;
     transition: top 0.2s ease-in-out;
-}toggle
+}
 
 /* ==========================================
    STEREONET ADAPTIVE FULLSCREEN & CONTROLS FIX
@@ -1332,13 +1592,13 @@ body.light-theme #clipping-ui .popup-close-btn:hover,
 
 #stereonet-window {
   position: absolute !important;
-  z-index: 1000 !important;
+  z-index: 999999 !important;
   background-color: rgba(20, 20, 20, 0.95) !important;
   border: 1px solid rgba(255, 255, 255, 0.2) !important;
   border-radius: 8px !important;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6) !important;
   box-sizing: border-box !important;
-  display: flex !important;
+  display: none;
   flex-direction: column !important;
   overflow: hidden !important;
 }
@@ -1441,91 +1701,208 @@ body.light-theme #clipping-ui .popup-close-btn:hover,
 }
 
 
-/* Pannello laterale destro */
-.alt-slider-panel {
-  position: absolute;
-  right: 15px;
+/* ==========================================
+   PANNELLO OFFSET Z (LARGHEZZA COMPATTA & MINIMIZZABILE)
+   ========================================== */
+
+.alt-slider-panel,
+#alt-slider-panel {
+  position: fixed;
+  right: 12px;
   top: 50%;
   transform: translateY(-50%);
-  z-index: 1000;
+  z-index: 9999;
   
-  background: rgba(20, 20, 20, 0.75);
+  width: 55px !important;
+  min-width: 55px !important;
+  max-width: 52px !important;
+  box-sizing: border-box !important;
+  
+  background: rgba(20, 20, 20, 0.85);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 12px;
   
-  padding: 12px 8px;
+  padding: 6px 4px !important;
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column !important;
+  align-items: center !important;
+  gap: 4px;
   color: #ffffff;
-  font-family: system-ui, -apple-system, sans-serif;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  transition: all 0.25s ease-in-out;
 }
-
+/* STATO MINIMIZZATO: Larghezza ridotta a 20px */
+.alt-slider-panel.collapsed,
+#alt-slider-panel.collapsed {
+  width: 20px !important;
+  min-width: 20px !important;
+  max-width: 20px !important;
+  padding: 4px 1px !important;
+  border-radius: 8px;
+}
+.alt-slider-panel.active,
+#alt-slider-panel.active {
+  display: flex !important;
+}
 .alt-label-title {
-  font-size: 10px;
+  font-size: 8px !important;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: #aaaaaa;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .slider-wrapper {
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center !important;
+  height: 200px !important; /* Ridotta l'altezza per non occupare lo schermo */
+  width: 100% !important;
+}
+/* Pulsante di Toggle compatto per l'Offset Z (Solo freccia) */
+.btn-alt-toggle {
+  background: #2a2a2a !important;
+  border: 1px solid #555 !important;
+  color: #00e5ff !important;
+  font-weight: bold;
+  border-radius: 6px;
+  padding: 0 !important;
+  cursor: pointer;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 32px !important;
+  height: 22px !important;
+  box-sizing: border-box !important;
+  margin: 0 !important;
+}
+/* ==========================================
+   REGOLE CSS PER MINIMIZZARE IL PANNELLO OFFSET Z
+   ========================================== */
+.alt-slider-panel.collapsed .btn-alt-toggle {
+  width: 100% !important;
+}
+/* Transizione per il corpo del pannello */
+.alt-slider-body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  height: 320px;
-  gap: 4px;
+  gap: 8px;
+  width: 100%;
+  overflow: hidden;
+  transition: max-height 0.25s ease, opacity 0.2s ease;
+  max-height: 320px;
+  opacity: 1;
 }
 
-.alt-limit {
-  font-size: 9px;
-  color: #888888;
+/* Quando il pannello ha la classe .collapsed, nasconde il contenuto */
+.alt-slider-panel.collapsed .alt-slider-body {
+  max-height: 0 !important;
+  opacity: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  pointer-events: none !important;
 }
 
-/* Stylings per lo Slider Verticale (Compatibilità Cross-Browser e Touch) */
-.alt-slider-panel input[type="range"] {
+/* Ruota la freccia quando è minimizzato */
+.alt-slider-panel.collapsed .alt-toggle-icon {
+  transform: rotate(180deg);
+}
+
+.btn-alt-toggle:hover {
+  background: #333 !important;
+  border-color: #00e5ff !important;
+}
+
+.alt-toggle-icon {
+  font-size: 10px;
+  line-height: 1;
+  transition: transform 0.25s ease;
+}
+/* Slider verticale sottile */
+.alt-slider-panel input[type="range"],
+#input-alt-slider {
   -webkit-appearance: slider-vertical;
-  writing-mode: bt-lr; /* IE/Edge */
-  width: 16px;
-  height: 240px;
+  writing-mode: bt-lr;
+  width: 8px !important;
+  height: 100% !important;
   cursor: pointer;
-  accent-color: #00ffff; /* Colore cyan coerente col pallino GPS */
+  accent-color: #00e5ff;
 }
 
-.alt-value-display {
-  font-size: 11px;
-  font-weight: 600;
-  color: #00ffff;
-  background: rgba(0, 0, 0, 0.4);
-  padding: 2px 6px;
-  border-radius: 4px;
-  min-width: 42px;
-  text-align: center;
+/* Container compatto per l'input numerico editabile */
+.alt-value-box {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid #00e5ff;
+  border-radius: 5px;
+  padding: 2px 2px !important;
+  width: 46px !important;
+  max-width: 46px !important;
+  box-sizing: border-box !important;
+}
+
+#alt-offset-input {
+  width: 30px !important;
+  background: transparent !important;
+  border: none !important;
+  color: #00e5ff !important;
+  font-size: 10px !important;
+  font-weight: bold !important;
+  text-align: center !important;
+  outline: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  -moz-appearance: textfield;
+}
+
+/* Rimuove le freccette dall'input di tipo number */
+#alt-offset-input::-webkit-outer-spin-button,
+#alt-offset-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.alt-value-box span {
+  color: #00e5ff;
+  font-size: 9px;
+  font-weight: bold;
+}
+
+/* Gruppo pulsanti reset e snap */
+.alt-btn-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
 }
 
 .btn-alt-reset {
   background: rgba(255, 255, 255, 0.1);
-  border: none;
+  border: 1px solid rgba(255, 255, 255, 0.15);
   color: #fff;
   border-radius: 50%;
-  width: 22px;
-  height: 22px;
-  font-size: 12px;
+  width: 26px !important;
+  height: 26px !important;
+  font-size: 11px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: background 0.2s;
+  padding: 0 !important;
+  margin: 0 !important;
 }
 
 .btn-alt-reset:active {
-  background: rgba(0, 255, 255, 0.4);
+  background: rgba(0, 229, 255, 0.4);
 }
-
 
 /* Pulsante Snap in stato attivo */
 .btn-alt-reset.active-snap {
@@ -1676,4 +2053,405 @@ body.light-theme #input-declination {
     color: #000000 !important;
 }
 
+/* ============================================================
+   OTTIMIZZAZIONI PER APP STANDALONE (iOS / Android / Desktop)
+   ============================================================ */
 
+/* --- iOS (WKWebView Standalone) --- */
+body.platform-ios {
+    /* Mantiene le dimensioni compatte senza zoom forzato */
+    -webkit-text-size-adjust: 100%;
+}
+
+/* Aumenta l'area di tap per i pulsanti touch senza ingrandire i font */
+body.platform-ios .mini-btn,
+body.platform-ios .icon-btn,
+body.platform-ios .top-tab-btn,
+body.platform-ios .menu-item {
+    min-height: 28px;
+    display: inline-flex;
+    align-items: center;
+}
+
+/* --- Android (Android WebView Standalone) --- */
+body.platform-android {
+    -webkit-text-size-adjust: 100%;
+}
+
+/* Scrollbar personalizzata sottile ed elegante */
+body.platform-android ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+}
+
+body.platform-android ::-webkit-scrollbar-thumb {
+    background: rgba(29, 158, 117, 0.7);
+    border-radius: 2px;
+}
+
+/* --- Desktop (Electron / Tauri / Browser Desktop) --- */
+body.platform-desktop {
+    -webkit-user-select: auto;
+    user-select: auto;
+}
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-left: 4px;
+}
+.status-disconnected { background-color: #ff4444; }
+.status-connecting   { background-color: #ffbb00; }
+.status-connected    { background-color: #00C851; box-shadow: 0 0 6px #00C851; }
+
+.modal-overlay {
+    position: fixed;
+    top: 0; left: 0; width: 100vw; height: 100vh;
+    background: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(4px);
+    z-index: 999999;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.modal-card {
+    background: #1e1e1e;
+    color: #f0f0f0;
+    width: 90%;
+    max-width: 380px;
+    border-radius: 10px;
+    border: 1px solid #444;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+    overflow: hidden;
+}
+
+.modal-header {
+    padding: 12px 16px;
+    background: #252525;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #333;
+}
+.modal-header h3 { margin: 0; font-size: 15px; }
+.btn-close { background: none; border: none; color: #aaa; font-size: 20px; cursor: pointer; }
+
+.modal-body { padding: 14px; }
+.status-banner {
+    background: #282828;
+    padding: 8px 12px;
+    border-radius: 6px;
+    margin-bottom: 12px;
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+}
+
+.form-group { margin-bottom: 10px; }
+.form-group label { display: block; font-size: 11px; color: #aaa; margin-bottom: 3px; }
+.form-group input {
+    width: 100%;
+    padding: 6px 8px;
+    background: #111;
+    border: 1px solid #444;
+    color: #fff;
+    border-radius: 4px;
+    box-sizing: border-box;
+    font-size: 13px;
+}
+
+.form-row { display: flex; gap: 8px; }
+.form-row .form-group { flex: 1; }
+
+.modal-footer {
+    padding: 10px 14px;
+    background: #252525;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    border-top: 1px solid #333;
+}
+
+.btn-cancel { background: transparent; border: 1px solid #555; color: #ccc; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+.btn-connect { background: #1D9E75; border: none; color: #fff; padding: 6px 14px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 12px; }
+
+
+/* Badge Stato Precisione RTK */
+.rtk-badge {
+    position: fixed;
+    top: 14px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 9999;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    backdrop-filter: blur(6px);
+    transition: all 0.3s ease;
+}
+
+/* RTK FIX: Massima Precisione (Verde) */
+.rtk-fix {
+    background: rgba(0, 200, 81, 0.25);
+    border: 1px solid #00C851;
+    color: #00E676;
+    box-shadow: 0 0 10px rgba(0, 230, 118, 0.4);
+}
+
+/* RTK FLOAT: Precisione Intermedia (Giallo) */
+.rtk-float {
+    background: rgba(255, 187, 0, 0.25);
+    border: 1px solid #ffbb00;
+    color: #FFD54F;
+}
+
+/* SINGLE: GPS Normale Senza Correzione (Rosso/Grigio) */
+.rtk-single {
+    background: rgba(255, 68, 68, 0.25);
+    border: 1px solid #ff4444;
+    color: #FF8A80;
+}
+/* ==========================================
+   SEZIONI COMPRIMIBILI (COLLAPSIBLE GROUPS)
+   ========================================== */
+.collapsible-group {
+    margin-bottom: 6px;
+}
+
+.collapsible-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 6px;
+    background: #2a2a2a;
+    border: 1px solid #444;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 10px;
+    color: #1D9E75;
+    user-select: none;
+    transition: background 0.2s;
+}
+
+.collapsible-header:hover {
+    background: #333;
+}
+
+.collapsible-header .btn-toggle {
+    background: transparent !important;
+    border: none !important;
+    color: #aaa !important;
+    font-size: 11px !important;
+    padding: 0 !important;
+    width: auto !important;
+    margin: 0 !important;
+    line-height: 1 !important;
+    transition: transform 0.2s ease;
+    cursor: pointer;
+}
+
+/* Stato quando la sezione è chiusa */
+.collapsible-group.collapsed .collapsible-content,
+#manual-orient-inputs.collapsed #section-geometry {
+    display: none !important;
+}
+
+.collapsible-group.collapsed .btn-toggle,
+#manual-orient-inputs.collapsed .btn-toggle {
+    transform: rotate(-90deg);
+}
+
+.collapsible-content {
+    padding-top: 4px;
+}
+
+/* OVERRIDE TEMA CHIARO (LIGHT THEME) PER SEZIONI COMPRIMIBILI */
+body.light-theme .collapsible-header {
+    background: #ffffff !important;
+    border-color: #cbd5e1 !important;
+    color: #0f6e56 !important;
+}
+
+body.light-theme .collapsible-header:hover {
+    background: #f1f5f9 !important;
+}
+
+body.light-theme .collapsible-header .btn-toggle {
+    color: #000000 !important;
+}
+#top-bar-left {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    height: 32px;
+}
+
+#top-bar-left select {
+    flex-shrink: 0;
+}
+
+/* Fix allineamento verticale menu CRS e select */
+#top-bar select,
+#crs-select {
+    position: relative;
+        top: 2px; /* Usa 1px o 2px (oppure -1px / -2px se è troppo in basso) */
+        height: 32px !important;
+    margin: 0 !important;
+    padding: 0 6px !important;
+    box-sizing: border-box !important;
+    align-self: center !important;
+    line-height: normal !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    border-radius: 4px;
+}
+/* Stile per pareggiare esattamente i pulsanti esistenti */
+#btn-measure {
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: 600;
+    height: 32px;
+    padding: 0 10px;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    vertical-align: middle;
+    margin: 0;
+}
+
+/* Stato attivo quando la misurazione è in corso */
+#btn-measure.active {
+    background-color: #ffc107 !important;
+    color: #000000 !important;
+    border-color: #e0a800 !important;
+}
+
+
+/* ============================================================
+   PANNELLO DESTRA (TOP-RIGHT CONTAINER) - TEMA CHIARO
+   ============================================================ */
+
+/* Contenitore principale (speculare a quello di sinistra) */
+body.light-theme #top-right-container {
+    background: rgba(255, 255, 255, 0.98) !important;
+    border: 1px solid #cbd5e1 !important;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15) !important;
+    color: #000000 !important;
+}
+
+/* Testi generici e sotto-pannelli */
+body.light-theme #top-right-container,
+body.light-theme #top-right-container label,
+body.light-theme #top-right-container span,
+body.light-theme #perf-controls-ui,
+body.light-theme #sensor-ui {
+    color: #000000 !important;
+}
+
+/* Riquadro statistiche VRAM (Geom / Tex) */
+body.light-theme #perf-controls-ui div[style*="background"] {
+    background: #f1f5f9 !important;
+    border: 1px solid #cbd5e1 !important;
+}
+
+body.light-theme #perf-controls-ui span[style*="color: #aaa"] {
+    color: #475569 !important;
+}
+
+body.light-theme #stat-geometries {
+    color: #0284c7 !important;
+}
+
+body.light-theme #stat-textures {
+    color: #d97706 !important;
+}
+
+/* Pulsanti preset (Low, Mid, High, Ultra) e pulsante FPS */
+body.light-theme .vram-btn-compact,
+body.light-theme #btn-toggle-fps {
+    background: #ffffff !important;
+    border: 1px solid #94a3b8 !important;
+    color: #000000 !important;
+    font-weight: 600 !important;
+}
+
+body.light-theme .vram-btn-compact:hover,
+body.light-theme #btn-toggle-fps:hover {
+    background: #e2e8f0 !important;
+}
+
+body.light-theme .vram-btn-compact.active {
+    background: #1D9E75 !important;
+    border-color: #1D9E75 !important;
+    color: #ffffff !important;
+}
+/* Riquadro Sensori come Pulsante Cliccabile */
+#sensor-data-box {
+    cursor: pointer;
+    padding: 6px;
+    border-radius: 6px;
+    border: 1px solid #444;
+    background: rgba(255, 255, 255, 0.05);
+    transition: background 0.2s, border-color 0.2s, transform 0.1s;
+    user-select: none;
+}
+
+#sensor-data-box:hover {
+    background: rgba(29, 158, 117, 0.25);
+    border-color: #1D9E75;
+}
+
+#sensor-data-box:active {
+    transform: scale(0.97);
+    background: rgba(29, 158, 117, 0.5);
+}
+
+/* Tema Chiaro */
+body.light-theme #sensor-data-box {
+    background: #f8fafc;
+    border-color: #cbd5e1;
+}
+
+body.light-theme #sensor-data-box:hover {
+    background: #e2e8f0;
+    border-color: #0f6e56;
+}
+
+/* Sposta lo slider in alto quando la tastiera si apre (input in focus) */
+.alt-slider-panel:focus-within,
+#alt-slider-panel:focus-within {
+  top: max(60px, env(safe-area-inset-top) + 20px) !important;
+  transform: translateY(0) !important;
+  transition: top 0.25s ease-in-out, transform 0.25s ease-in-out !important;
+}
+
+/* Nasconde il pulsante RTK */
+#btnNtrip {
+    display: none !important;
+}
+
+/* Nasconde il pulsante PDF dentro lo Stereonet */
+#stereonet-export-pdf-btn {
+    display: none !important;
+}
+
+
+@keyframes mic-pulse {
+    0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 68, 68, 0.7); }
+    70% { transform: scale(1.05); box-shadow: 0 0 10px 10px rgba(255, 68, 68, 0); }
+    100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 68, 68, 0); }
+}
+
+.pulse-animation {
+    animation: mic-pulse 1.5s infinite;
+}
